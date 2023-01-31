@@ -5,13 +5,12 @@ type G1 = pasta_curves::pallas::Point;
 type G2 = pasta_curves::vesta::Point;
 use ::bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::PrimeField;
-use flate2::{write::ZlibEncoder, Compression};
 use nova_snark::{
   traits::{
     circuit::{StepCircuit, TrivialTestCircuit},
     Group,
   },
-  CompressedSNARK, PublicParams, RecursiveSNARK, StepCounterType,
+  CompressedSNARK, PublicParams, RecursiveSNARK, StepCounterType, FINAL_EXTERNAL_COUNTER,
 };
 use num_bigint::BigUint;
 use std::time::Instant;
@@ -97,7 +96,7 @@ where
     for i in 0..self.seq.len() {
       // non deterministic advice
       let x_i_plus_1 =
-        AllocatedNum::alloc(cs.namespace(|| format!("x_i_plus_1_iter_{i}")), || {
+        AllocatedNum::alloc(cs.namespace(|| format!("x_i_plus_1_iter_{}", i)), || {
           Ok(self.seq[i].x_i_plus_1)
         })?;
 
@@ -106,11 +105,12 @@ where
       // (ii) y_i_plus_1 = x_i
       // (1) constraints for condition (i) are below
       // (2) constraints for condition (ii) is avoided because we just used x_i wherever y_i_plus_1 is used
-      let x_i_plus_1_sq = x_i_plus_1.square(cs.namespace(|| format!("x_i_plus_1_sq_iter_{i}")))?;
+      let x_i_plus_1_sq =
+        x_i_plus_1.square(cs.namespace(|| format!("x_i_plus_1_sq_iter_{}", i)))?;
       let x_i_plus_1_quad =
-        x_i_plus_1_sq.square(cs.namespace(|| format!("x_i_plus_1_quad_{i}")))?;
+        x_i_plus_1_sq.square(cs.namespace(|| format!("x_i_plus_1_quad_{}", i)))?;
       cs.enforce(
-        || format!("x_i_plus_1_quad * x_i_plus_1 = x_i + y_i_iter_{i}"),
+        || format!("x_i_plus_1_quad * x_i_plus_1 = x_i + y_i_iter_{}", i),
         |lc| lc + x_i_plus_1_quad.get_variable(),
         |lc| lc + x_i_plus_1.get_variable(),
         |lc| lc + x_i.get_variable() + y_i.get_variable(),
@@ -129,7 +129,7 @@ where
   }
 
   fn get_counter_type(&self) -> StepCounterType {
-    StepCounterType::Incremental
+    StepCounterType::External
   }
 
   fn output(&self, z: &[F]) -> Vec<F> {
@@ -164,12 +164,14 @@ fn main() {
       ],
     };
 
-    let circuit_secondary = TrivialTestCircuit::default();
+    let circuit_secondary = TrivialTestCircuit::new(StepCounterType::External);
 
-    println!("Proving {num_iters_per_step} iterations of MinRoot per step");
+    println!(
+      "Proving {} iterations of MinRoot per step",
+      num_iters_per_step
+    );
 
     // produce public parameters
-    let start = Instant::now();
     println!("Producing public parameters...");
     let pp = PublicParams::<
       G1,
@@ -178,7 +180,6 @@ fn main() {
       TrivialTestCircuit<<G2 as Group>::Scalar>,
     >::setup(circuit_primary, circuit_secondary.clone())
     .unwrap();
-    println!("PublicParams::setup, took {:?} ", start.elapsed());
     println!(
       "Number of constraints per step (primary circuit): {}",
       pp.num_constraints().0
@@ -250,7 +251,12 @@ fn main() {
     // verify the recursive SNARK
     println!("Verifying a RecursiveSNARK...");
     let start = Instant::now();
-    let res = recursive_snark.verify(&pp, num_steps, z0_primary.clone(), z0_secondary.clone());
+    let res = recursive_snark.verify(
+      &pp,
+      FINAL_EXTERNAL_COUNTER,
+      z0_primary.clone(),
+      z0_secondary.clone(),
+    );
     println!(
       "RecursiveSNARK::verify: {:?}, took {:?}",
       res.is_ok(),
@@ -261,11 +267,8 @@ fn main() {
     // produce a compressed SNARK
     println!("Generating a CompressedSNARK using Spartan with IPA-PC...");
     let start = Instant::now();
-    type EE1 = nova_snark::provider::ipa_pc::EvaluationEngine<G1>;
-    type EE2 = nova_snark::provider::ipa_pc::EvaluationEngine<G2>;
-    type S1 = nova_snark::spartan::RelaxedR1CSSNARK<G1, EE1>;
-    type S2 = nova_snark::spartan::RelaxedR1CSSNARK<G2, EE2>;
-
+    type S1 = nova_snark::spartan_with_ipa_pc::RelaxedR1CSSNARK<G1>;
+    type S2 = nova_snark::spartan_with_ipa_pc::RelaxedR1CSSNARK<G2>;
     let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &recursive_snark);
     println!(
       "CompressedSNARK::prove: {:?}, took {:?}",
@@ -275,18 +278,10 @@ fn main() {
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
 
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    bincode::serialize_into(&mut encoder, &compressed_snark).unwrap();
-    let compressed_snark_encoded = encoder.finish().unwrap();
-    println!(
-      "CompressedSNARK::len {:?} bytes",
-      compressed_snark_encoded.len()
-    );
-
     // verify the compressed SNARK
     println!("Verifying a CompressedSNARK...");
     let start = Instant::now();
-    let res = compressed_snark.verify(&pp, num_steps, z0_primary, z0_secondary);
+    let res = compressed_snark.verify(&pp, FINAL_EXTERNAL_COUNTER, z0_primary, z0_secondary);
     println!(
       "CompressedSNARK::verify: {:?}, took {:?}",
       res.is_ok(),

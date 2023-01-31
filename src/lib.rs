@@ -49,6 +49,19 @@ use traits::{
   AbsorbInROTrait, Group, ROConstants, ROConstantsCircuit, ROConstantsTrait, ROTrait,
 };
 
+/// The type of counter used to measure the progress of the recusrive computation
+#[derive(Eq, PartialEq, Debug, Copy, Clone, Serialize, Deserialize)]
+pub enum StepCounterType {
+  /// Incremental counter is a standard monotonically increasing integer
+  Incremental,
+  /// External counter introduces completion that is defined outside of the circuit
+  External,
+}
+
+/// When using Extenral Step counter type, the verifier should use
+/// `FINAL_EXTERNAL_COUNTER` as the number of steps of execution.
+pub const FINAL_EXTERNAL_COUNTER: usize = 1;
+
 /// A type that holds public parameters of Nova
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -61,6 +74,7 @@ where
 {
   F_arity_primary: usize,
   F_arity_secondary: usize,
+  counter_type: StepCounterType,
   ro_consts_primary: ROConstants<G1>,
   ro_consts_circuit_primary: ROConstantsCircuit<G2>,
   r1cs_gens_primary: R1CSGens<G1>,
@@ -85,7 +99,7 @@ where
   C2: StepCircuit<G2::Scalar>,
 {
   /// Create a new `PublicParams`
-  pub fn setup(c_primary: C1, c_secondary: C2) -> Self {
+  pub fn setup(c_primary: C1, c_secondary: C2) -> Result<Self, NovaError> {
     let augmented_circuit_params_primary =
       NovaAugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS, true);
     let augmented_circuit_params_secondary =
@@ -96,6 +110,13 @@ where
 
     let F_arity_primary = c_primary.arity();
     let F_arity_secondary = c_secondary.arity();
+
+    let step_counter_primary = c_primary.get_counter_type();
+    let step_counter_secondary = c_secondary.get_counter_type();
+
+    if step_counter_primary != step_counter_secondary {
+      return Err(NovaError::MismatchedCounterType);
+    }
 
     // ro_consts_circuit_primart are parameterized by G2 because the type alias uses G2::Base = G1::Scalar
     let ro_consts_circuit_primary: ROConstantsCircuit<G2> = ROConstantsCircuit::<G2>::new();
@@ -125,9 +146,10 @@ where
     let (r1cs_shape_secondary, r1cs_gens_secondary) = (cs.r1cs_shape(), cs.r1cs_gens());
     let r1cs_shape_padded_secondary = r1cs_shape_secondary.pad();
 
-    Self {
+    Ok(Self {
       F_arity_primary,
       F_arity_secondary,
+      counter_type: step_counter_primary,
       ro_consts_primary,
       ro_consts_circuit_primary,
       r1cs_gens_primary,
@@ -142,7 +164,12 @@ where
       augmented_circuit_params_secondary,
       _p_c1: Default::default(),
       _p_c2: Default::default(),
-    }
+    })
+  }
+
+  /// Returns the type of the counter for this circuit
+  pub fn get_counter_type(&self) -> StepCounterType {
+    self.counter_type
   }
 
   /// Returns the number of constraints in the primary and secondary circuits
@@ -207,6 +234,8 @@ where
     if z0_primary.len() != pp.F_arity_primary || z0_secondary.len() != pp.F_arity_secondary {
       return Err(NovaError::InvalidInitialInputLength);
     }
+
+    let counter_type = pp.get_counter_type();
 
     match recursive_snark {
       None => {
@@ -281,6 +310,11 @@ where
           return Err(NovaError::InvalidStepOutputLength);
         }
 
+        let next_counter = match counter_type {
+          StepCounterType::Incremental => 1,
+          StepCounterType::External => 1,
+        };
+
         Ok(Self {
           r_W_primary,
           r_U_primary,
@@ -290,7 +324,7 @@ where
           r_U_secondary,
           l_w_secondary,
           l_u_secondary,
-          i: 1_usize,
+          i: next_counter,
           zi_primary,
           zi_secondary,
           _p_c1: Default::default(),
@@ -370,6 +404,11 @@ where
         let zi_primary = c_primary.output(&r_snark.zi_primary);
         let zi_secondary = c_secondary.output(&r_snark.zi_secondary);
 
+        let next_counter = match counter_type {
+          StepCounterType::Incremental => r_snark.i + 1,
+          StepCounterType::External => 1,
+        };
+
         Ok(Self {
           r_W_primary,
           r_U_primary,
@@ -379,7 +418,7 @@ where
           r_U_secondary,
           l_w_secondary,
           l_u_secondary,
-          i: r_snark.i + 1,
+          i: next_counter,
           zi_primary,
           zi_secondary,
           _p_c1: Default::default(),
@@ -397,14 +436,25 @@ where
     z0_primary: Vec<G1::Scalar>,
     z0_secondary: Vec<G2::Scalar>,
   ) -> Result<(Vec<G1::Scalar>, Vec<G2::Scalar>), NovaError> {
-    // number of steps cannot be zero
-    if num_steps == 0 {
-      return Err(NovaError::ProofVerifyError);
-    }
+    let counter_type = pp.get_counter_type();
 
-    // check if the provided proof has executed num_steps
-    if self.i != num_steps {
-      return Err(NovaError::ProofVerifyError);
+    // If counter_type is External, the number of invocations
+    // is irrevelant since progress is measured externally.
+    // If it is Incremental, then it should have been executed it
+    // num_steps, and num_steps should be non-zero.
+    match counter_type {
+      StepCounterType::External => {}
+      StepCounterType::Incremental => {
+        // number of steps cannot be zero
+        if num_steps == 0 {
+          return Err(NovaError::ProofVerifyError);
+        }
+
+        // check if the provided proof has executed num_steps
+        if self.i != num_steps {
+          return Err(NovaError::ProofVerifyError);
+        }
+      }
     }
 
     // check if the (relaxed) R1CS instances have two public outputs
@@ -632,9 +682,20 @@ where
     z0_primary: Vec<G1::Scalar>,
     z0_secondary: Vec<G2::Scalar>,
   ) -> Result<(Vec<G1::Scalar>, Vec<G2::Scalar>), NovaError> {
-    // number of steps cannot be zero
-    if num_steps == 0 {
-      return Err(NovaError::ProofVerifyError);
+    let counter_type = pp.get_counter_type();
+
+    // If counter_type is External, the number of invocations
+    // is irrevelant since progress is measured externally.
+    // If it is Incremental, then it should have been executed it
+    // num_steps, and num_steps should be non-zero.
+    match counter_type {
+      StepCounterType::External => {}
+      StepCounterType::Incremental => {
+        // number of steps cannot be zero
+        if num_steps == 0 {
+          return Err(NovaError::ProofVerifyError);
+        }
+      }
     }
 
     // check if the (relaxed) R1CS instances have two public outputs
@@ -744,9 +805,35 @@ mod tests {
   use ff::PrimeField;
   use traits::circuit::TrivialTestCircuit;
 
-  #[derive(Clone, Debug, Default)]
+  #[derive(Clone, Debug)]
   struct CubicCircuit<F: PrimeField> {
     _p: PhantomData<F>,
+    counter_type: StepCounterType,
+  }
+
+  impl<F> CubicCircuit<F>
+  where
+    F: PrimeField,
+  {
+    pub fn new(counter_type: StepCounterType) -> CubicCircuit<F> {
+      Self {
+        _p: PhantomData::default(),
+        counter_type,
+      }
+    }
+  }
+
+  impl<F> Default for CubicCircuit<F>
+  where
+    F: PrimeField,
+  {
+    /// Creates a new trivial test circuit with step counter type Incremental
+    fn default() -> CubicCircuit<F> {
+      Self {
+        _p: PhantomData::default(),
+        counter_type: StepCounterType::Incremental,
+      }
+    }
   }
 
   impl<F> StepCircuit<F> for CubicCircuit<F>
@@ -788,6 +875,10 @@ mod tests {
       Ok(vec![y])
     }
 
+    fn get_counter_type(&self) -> StepCounterType {
+      self.counter_type
+    }
+
     fn output(&self, z: &[F]) -> Vec<F> {
       vec![z[0] * z[0] * z[0] + z[0] + F::from(5u64)]
     }
@@ -801,7 +892,8 @@ mod tests {
       G2,
       TrivialTestCircuit<<G1 as Group>::Scalar>,
       TrivialTestCircuit<<G2 as Group>::Scalar>,
-    >::setup(TrivialTestCircuit::default(), TrivialTestCircuit::default());
+    >::setup(TrivialTestCircuit::default(), TrivialTestCircuit::default())
+    .unwrap();
 
     let num_steps = 1;
 
@@ -828,6 +920,42 @@ mod tests {
   }
 
   #[test]
+  fn test_ivc_external_trivial() {
+    let circuit_primary = TrivialTestCircuit::new(StepCounterType::External);
+    let circuit_secondary = TrivialTestCircuit::new(StepCounterType::External);
+
+    // produce public parameters
+    let pp = PublicParams::<
+      G1,
+      G2,
+      TrivialTestCircuit<<G1 as Group>::Scalar>,
+      TrivialTestCircuit<<G2 as Group>::Scalar>,
+    >::setup(circuit_primary.clone(), circuit_secondary.clone())
+    .unwrap();
+
+    // produce a recursive SNARK
+    let res = RecursiveSNARK::prove_step(
+      &pp,
+      None,
+      circuit_primary,
+      circuit_secondary,
+      vec![<G1 as Group>::Scalar::zero()],
+      vec![<G2 as Group>::Scalar::zero()],
+    );
+    assert!(res.is_ok());
+    let recursive_snark = res.unwrap();
+
+    // verify the recursive SNARK
+    let res = recursive_snark.verify(
+      &pp,
+      FINAL_EXTERNAL_COUNTER,
+      vec![<G1 as Group>::Scalar::zero()],
+      vec![<G2 as Group>::Scalar::zero()],
+    );
+    assert!(res.is_ok());
+  }
+
+  #[test]
   fn test_ivc_nontrivial() {
     let circuit_primary = TrivialTestCircuit::default();
     let circuit_secondary = CubicCircuit::default();
@@ -838,7 +966,8 @@ mod tests {
       G2,
       TrivialTestCircuit<<G1 as Group>::Scalar>,
       CubicCircuit<<G2 as Group>::Scalar>,
-    >::setup(circuit_primary.clone(), circuit_secondary.clone());
+    >::setup(circuit_primary.clone(), circuit_secondary.clone())
+    .unwrap();
 
     let num_steps = 3;
 
@@ -902,6 +1031,81 @@ mod tests {
   }
 
   #[test]
+  fn test_ivc_external_nontrivial() {
+    let circuit_primary = TrivialTestCircuit::new(StepCounterType::External);
+    let circuit_secondary = CubicCircuit::new(StepCounterType::External);
+
+    // produce public parameters
+    let pp = PublicParams::<
+      G1,
+      G2,
+      TrivialTestCircuit<<G1 as Group>::Scalar>,
+      CubicCircuit<<G2 as Group>::Scalar>,
+    >::setup(circuit_primary.clone(), circuit_secondary.clone())
+    .unwrap();
+
+    let num_steps = 3;
+
+    // produce a recursive SNARK
+    let mut recursive_snark: Option<
+      RecursiveSNARK<
+        G1,
+        G2,
+        TrivialTestCircuit<<G1 as Group>::Scalar>,
+        CubicCircuit<<G2 as Group>::Scalar>,
+      >,
+    > = None;
+
+    for _i in 0..num_steps {
+      let res = RecursiveSNARK::prove_step(
+        &pp,
+        recursive_snark,
+        circuit_primary.clone(),
+        circuit_secondary.clone(),
+        vec![<G1 as Group>::Scalar::one()],
+        vec![<G2 as Group>::Scalar::zero()],
+      );
+      assert!(res.is_ok());
+      let recursive_snark_unwrapped = res.unwrap();
+
+      // verify the recursive snark at each step of recursion
+      let res = recursive_snark_unwrapped.verify(
+        &pp,
+        FINAL_EXTERNAL_COUNTER,
+        vec![<G1 as Group>::Scalar::one()],
+        vec![<G2 as Group>::Scalar::zero()],
+      );
+      assert!(res.is_ok());
+
+      // set the running variable for the next iteration
+      recursive_snark = Some(recursive_snark_unwrapped);
+    }
+
+    assert!(recursive_snark.is_some());
+    let recursive_snark = recursive_snark.unwrap();
+
+    // verify the recursive SNARK
+    let res = recursive_snark.verify(
+      &pp,
+      FINAL_EXTERNAL_COUNTER,
+      vec![<G1 as Group>::Scalar::one()],
+      vec![<G2 as Group>::Scalar::zero()],
+    );
+    assert!(res.is_ok());
+
+    let (zn_primary, zn_secondary) = res.unwrap();
+
+    // sanity: check the claimed output with a direct computation of the same
+    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::one()]);
+    let mut zn_secondary_direct = vec![<G2 as Group>::Scalar::zero()];
+    for _i in 0..num_steps {
+      zn_secondary_direct = CubicCircuit::default().output(&zn_secondary_direct);
+    }
+    assert_eq!(zn_secondary, zn_secondary_direct);
+    assert_eq!(zn_secondary, vec![<G2 as Group>::Scalar::from(2460515u64)]);
+  }
+
+  #[test]
   fn test_ivc_nontrivial_with_compression() {
     let circuit_primary = TrivialTestCircuit::default();
     let circuit_secondary = CubicCircuit::default();
@@ -912,7 +1116,8 @@ mod tests {
       G2,
       TrivialTestCircuit<<G1 as Group>::Scalar>,
       CubicCircuit<<G2 as Group>::Scalar>,
-    >::setup(circuit_primary.clone(), circuit_secondary.clone());
+    >::setup(circuit_primary.clone(), circuit_secondary.clone())
+    .unwrap();
 
     let num_steps = 3;
 
@@ -974,6 +1179,236 @@ mod tests {
       vec![<G1 as Group>::Scalar::one()],
       vec![<G2 as Group>::Scalar::zero()],
     );
+    assert!(res.is_ok());
+  }
+
+  #[test]
+  fn test_ivc_external_nontrivial_with_compression() {
+    let circuit_primary = TrivialTestCircuit::new(StepCounterType::External);
+    let circuit_secondary = CubicCircuit::new(StepCounterType::External);
+
+    // produce public parameters
+    let pp = PublicParams::<
+      G1,
+      G2,
+      TrivialTestCircuit<<G1 as Group>::Scalar>,
+      CubicCircuit<<G2 as Group>::Scalar>,
+    >::setup(circuit_primary.clone(), circuit_secondary.clone())
+    .unwrap();
+
+    let num_steps = 3;
+
+    // produce a recursive SNARK
+    let mut recursive_snark: Option<
+      RecursiveSNARK<
+        G1,
+        G2,
+        TrivialTestCircuit<<G1 as Group>::Scalar>,
+        CubicCircuit<<G2 as Group>::Scalar>,
+      >,
+    > = None;
+
+    for _i in 0..num_steps {
+      let res = RecursiveSNARK::prove_step(
+        &pp,
+        recursive_snark,
+        circuit_primary.clone(),
+        circuit_secondary.clone(),
+        vec![<G1 as Group>::Scalar::one()],
+        vec![<G2 as Group>::Scalar::zero()],
+      );
+      assert!(res.is_ok());
+      recursive_snark = Some(res.unwrap());
+    }
+
+    assert!(recursive_snark.is_some());
+    let recursive_snark = recursive_snark.unwrap();
+
+    // verify the recursive SNARK
+    let res = recursive_snark.verify(
+      &pp,
+      FINAL_EXTERNAL_COUNTER,
+      vec![<G1 as Group>::Scalar::one()],
+      vec![<G2 as Group>::Scalar::zero()],
+    );
+    assert!(res.is_ok());
+
+    let (zn_primary, zn_secondary) = res.unwrap();
+
+    // sanity: check the claimed output with a direct computation of the same
+    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::one()]);
+    let mut zn_secondary_direct = vec![<G2 as Group>::Scalar::zero()];
+    for _i in 0..num_steps {
+      zn_secondary_direct = CubicCircuit::default().output(&zn_secondary_direct);
+    }
+    assert_eq!(zn_secondary, zn_secondary_direct);
+    assert_eq!(zn_secondary, vec![<G2 as Group>::Scalar::from(2460515u64)]);
+
+    // produce a compressed SNARK
+    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &recursive_snark);
+    assert!(res.is_ok());
+    let compressed_snark = res.unwrap();
+
+    // verify the compressed SNARK
+    let res = compressed_snark.verify(
+      &pp,
+      FINAL_EXTERNAL_COUNTER,
+      vec![<G1 as Group>::Scalar::one()],
+      vec![<G2 as Group>::Scalar::zero()],
+    );
+    assert!(res.is_ok());
+  }
+
+  #[test]
+  fn test_ivc_external_nondet_with_compression() {
+    // y is a non-deterministic advice representing the fifth root of the input at a step.
+    #[derive(Clone, Debug)]
+    struct FifthRootCheckingCircuitExternal<F: PrimeField> {
+      y: F,
+    }
+
+    impl<F> FifthRootCheckingCircuitExternal<F>
+    where
+      F: PrimeField,
+    {
+      fn new(num_steps: usize) -> (Vec<F>, Vec<Self>) {
+        let mut powers = Vec::new();
+        let rng = &mut rand::rngs::OsRng;
+        let mut seed = F::random(rng);
+        for _i in 0..num_steps + 1 {
+          let mut power = seed;
+          power = power.square();
+          power = power.square();
+          power *= seed;
+
+          powers.push(Self { y: power });
+
+          seed = power;
+        }
+
+        // reverse the powers to get roots
+        let roots = powers.into_iter().rev().collect::<Vec<Self>>();
+        (vec![roots[0].y], roots[1..].to_vec())
+      }
+    }
+
+    impl<F> StepCircuit<F> for FifthRootCheckingCircuitExternal<F>
+    where
+      F: PrimeField,
+    {
+      fn arity(&self) -> usize {
+        1
+      }
+
+      fn synthesize<CS: ConstraintSystem<F>>(
+        &self,
+        cs: &mut CS,
+        z: &[AllocatedNum<F>],
+      ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+        let x = &z[0];
+
+        // we allocate a variable and set it to the provided non-derministic advice.
+        let y = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(self.y))?;
+
+        // We now check if y = x^{1/5} by checking if y^5 = x
+        let y_sq = y.square(cs.namespace(|| "y_sq"))?;
+        let y_quad = y_sq.square(cs.namespace(|| "y_quad"))?;
+        let y_pow_5 = y_quad.mul(cs.namespace(|| "y_fifth"), &y)?;
+
+        cs.enforce(
+          || "y^5 = x",
+          |lc| lc + y_pow_5.get_variable(),
+          |lc| lc + CS::one(),
+          |lc| lc + x.get_variable(),
+        );
+
+        Ok(vec![y])
+      }
+
+      fn get_counter_type(&self) -> StepCounterType {
+        StepCounterType::External
+      }
+
+      fn output(&self, z: &[F]) -> Vec<F> {
+        // sanity check
+        let x = z[0];
+        let y_pow_5 = {
+          let y = self.y;
+          let y_sq = y.square();
+          let y_quad = y_sq.square();
+          y_quad * self.y
+        };
+        assert_eq!(x, y_pow_5);
+
+        // return non-deterministic advice
+        // as the output of the step
+        vec![self.y]
+      }
+    }
+
+    let circuit_primary = FifthRootCheckingCircuitExternal {
+      y: <G1 as Group>::Scalar::zero(),
+    };
+
+    let circuit_secondary = TrivialTestCircuit::new(StepCounterType::External);
+
+    // produce public parameters
+    let pp = PublicParams::<
+      G1,
+      G2,
+      FifthRootCheckingCircuitExternal<<G1 as Group>::Scalar>,
+      TrivialTestCircuit<<G2 as Group>::Scalar>,
+    >::setup(circuit_primary, circuit_secondary.clone())
+    .unwrap();
+
+    let num_steps = 3;
+
+    // produce non-deterministic advice
+    let (z0_primary, roots) = FifthRootCheckingCircuitExternal::new(num_steps);
+    let z0_secondary = vec![<G2 as Group>::Scalar::zero()];
+
+    // produce a recursive SNARK
+    let mut recursive_snark: Option<
+      RecursiveSNARK<
+        G1,
+        G2,
+        FifthRootCheckingCircuitExternal<<G1 as Group>::Scalar>,
+        TrivialTestCircuit<<G2 as Group>::Scalar>,
+      >,
+    > = None;
+
+    for circuit_primary in roots.iter().take(num_steps) {
+      let res = RecursiveSNARK::prove_step(
+        &pp,
+        recursive_snark,
+        circuit_primary.clone(),
+        circuit_secondary.clone(),
+        z0_primary.clone(),
+        z0_secondary.clone(),
+      );
+      assert!(res.is_ok());
+      recursive_snark = Some(res.unwrap());
+    }
+
+    assert!(recursive_snark.is_some());
+    let recursive_snark = recursive_snark.unwrap();
+
+    // verify the recursive SNARK
+    let res = recursive_snark.verify(
+      &pp,
+      FINAL_EXTERNAL_COUNTER,
+      z0_primary.clone(),
+      z0_secondary.clone(),
+    );
+    assert!(res.is_ok());
+
+    // produce a compressed SNARK
+    let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &recursive_snark);
+    assert!(res.is_ok());
+    let compressed_snark = res.unwrap();
+
+    // verify the compressed SNARK
+    let res = compressed_snark.verify(&pp, FINAL_EXTERNAL_COUNTER, z0_primary, z0_secondary);
     assert!(res.is_ok());
   }
 
@@ -1043,6 +1478,10 @@ mod tests {
         Ok(vec![y])
       }
 
+      fn get_counter_type(&self) -> StepCounterType {
+        StepCounterType::Incremental
+      }
+
       fn output(&self, z: &[F]) -> Vec<F> {
         // sanity check
         let x = z[0];
@@ -1072,7 +1511,8 @@ mod tests {
       G2,
       FifthRootCheckingCircuit<<G1 as Group>::Scalar>,
       TrivialTestCircuit<<G2 as Group>::Scalar>,
-    >::setup(circuit_primary, circuit_secondary.clone());
+    >::setup(circuit_primary, circuit_secondary.clone())
+    .unwrap();
 
     let num_steps = 3;
 
@@ -1121,6 +1561,47 @@ mod tests {
   }
 
   #[test]
+  fn test_ivc_external_base() {
+    // produce public parameters
+    let pp = PublicParams::<
+      G1,
+      G2,
+      TrivialTestCircuit<<G1 as Group>::Scalar>,
+      CubicCircuit<<G2 as Group>::Scalar>,
+    >::setup(
+      TrivialTestCircuit::new(StepCounterType::External),
+      CubicCircuit::new(StepCounterType::External),
+    )
+    .unwrap();
+
+    // produce a recursive SNARK
+    let res = RecursiveSNARK::prove_step(
+      &pp,
+      None,
+      TrivialTestCircuit::default(),
+      CubicCircuit::default(),
+      vec![<G1 as Group>::Scalar::one()],
+      vec![<G2 as Group>::Scalar::zero()],
+    );
+    assert!(res.is_ok());
+    let recursive_snark = res.unwrap();
+
+    // verify the recursive SNARK
+    let res = recursive_snark.verify(
+      &pp,
+      FINAL_EXTERNAL_COUNTER,
+      vec![<G1 as Group>::Scalar::one()],
+      vec![<G2 as Group>::Scalar::zero()],
+    );
+    assert!(res.is_ok());
+
+    let (zn_primary, zn_secondary) = res.unwrap();
+
+    assert_eq!(zn_primary, vec![<G1 as Group>::Scalar::one()]);
+    assert_eq!(zn_secondary, vec![<G2 as Group>::Scalar::from(5u64)]);
+  }
+
+  #[test]
   fn test_ivc_base() {
     // produce public parameters
     let pp = PublicParams::<
@@ -1128,7 +1609,8 @@ mod tests {
       G2,
       TrivialTestCircuit<<G1 as Group>::Scalar>,
       CubicCircuit<<G2 as Group>::Scalar>,
-    >::setup(TrivialTestCircuit::default(), CubicCircuit::default());
+    >::setup(TrivialTestCircuit::default(), CubicCircuit::default())
+    .unwrap();
 
     let num_steps = 1;
 

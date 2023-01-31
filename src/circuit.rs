@@ -20,6 +20,7 @@ use crate::{
     circuit::StepCircuit, commitment::CommitmentTrait, Group, ROCircuitTrait, ROConstantsCircuit,
   },
   Commitment,
+  StepCounterType,
 };
 use bellperson::{
   gadgets::{
@@ -270,6 +271,7 @@ impl<G: Group, SC: StepCircuit<G::Base>> Circuit<<G as Group>::Base>
     cs: &mut CS,
   ) -> Result<(), SynthesisError> {
     let arity = self.step_circuit.arity();
+    let counter_type = self.step_circuit.get_counter_type();
 
     // Allocate all witnesses
     let (params, i, z_0, z_i, U, u, T) =
@@ -317,15 +319,32 @@ impl<G: Group, SC: StepCircuit<G::Base>> Circuit<<G as Group>::Base>
     )?;
 
     // Compute i + 1
-    let i_new = AllocatedNum::alloc(cs.namespace(|| "i + 1"), || {
-      Ok(*i.get_value().get()? + G::Base::one())
+    let i_new = AllocatedNum::alloc(cs.namespace(|| "next i"), || match counter_type {
+      StepCounterType::Incremental => Ok(*i.get_value().get()? + G::Base::one()),
+      StepCounterType::External => {
+        let inc = *is_base_case.get_value().get()? as u64;
+        Ok(*i.get_value().get()? + G::Base::from(inc))
+      }
     })?;
-    cs.enforce(
-      || "check i + 1",
-      |lc| lc,
-      |lc| lc,
-      |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
-    );
+
+    match counter_type {
+      StepCounterType::Incremental => {
+        cs.enforce(
+          || "check i + 1",
+          |lc| lc,
+          |lc| lc,
+          |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
+        );
+      }
+      StepCounterType::External => {
+        cs.enforce(
+          || "check i + 1 base",
+          |lc| lc,
+          |lc| lc,
+          |lc| lc + i_new.get_variable() - is_base_case.get_variable() - i.get_variable(),
+        );
+      }
+    }
 
     // Compute z_{i+1}
     let z_input = conditionally_select_vec(

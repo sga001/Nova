@@ -9,7 +9,7 @@ use nova_snark::{
     circuit::{StepCircuit, TrivialTestCircuit},
     Group,
   },
-  PublicParams, RecursiveSNARK,
+  PublicParams, RecursiveSNARK, StepCounterType,
 };
 use std::time::Duration;
 
@@ -42,7 +42,8 @@ fn bench_recursive_snark(c: &mut Criterion) {
     let pp = PublicParams::<G1, G2, C1, C2>::setup(
       NonTrivialTestCircuit::new(num_cons),
       TrivialTestCircuit::default(),
-    );
+    )
+    .unwrap();
 
     // Bench time to produce a recursive SNARK;
     // we execute a certain number of warm-up steps since executing
@@ -148,6 +149,10 @@ where
       x = y.clone();
     }
     Ok(vec![y])
+  }
+
+  fn get_counter_type(&self) -> StepCounterType {
+    StepCounterType::Incremental
   }
 
   fn output(&self, z: &[F]) -> Vec<F> {
