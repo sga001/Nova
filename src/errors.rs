@@ -21,6 +21,7 @@ pub enum NovaError {
   #[error("UnSat")]
   UnSat,
   /// returned if the counter types for the primary and secondary circuit are not the same
+  #[error("MismatchedCounterType")]
   MismatchedCounterType,
   /// returned when the supplied compressed commitment cannot be decompressed
   #[error("DecompressionError")]
