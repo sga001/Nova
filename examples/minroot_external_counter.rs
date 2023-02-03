@@ -5,6 +5,7 @@ type G1 = pasta_curves::pallas::Point;
 type G2 = pasta_curves::vesta::Point;
 use ::bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::PrimeField;
+use flate2::{write::ZlibEncoder, Compression};
 use nova_snark::{
   traits::{
     circuit::{StepCircuit, TrivialTestCircuit},
@@ -267,8 +268,10 @@ fn main() {
     // produce a compressed SNARK
     println!("Generating a CompressedSNARK using Spartan with IPA-PC...");
     let start = Instant::now();
-    type S1 = nova_snark::spartan_with_ipa_pc::RelaxedR1CSSNARK<G1>;
-    type S2 = nova_snark::spartan_with_ipa_pc::RelaxedR1CSSNARK<G2>;
+    type EE1 = nova_snark::provider::ipa_pc::EvaluationEngine<G1>;
+    type EE2 = nova_snark::provider::ipa_pc::EvaluationEngine<G2>;
+    type S1 = nova_snark::spartan::RelaxedR1CSSNARK<G1, EE1>;
+    type S2 = nova_snark::spartan::RelaxedR1CSSNARK<G2, EE2>;
     let res = CompressedSNARK::<_, _, _, _, S1, S2>::prove(&pp, &recursive_snark);
     println!(
       "CompressedSNARK::prove: {:?}, took {:?}",
@@ -277,6 +280,14 @@ fn main() {
     );
     assert!(res.is_ok());
     let compressed_snark = res.unwrap();
+
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    bincode::serialize_into(&mut encoder, &compressed_snark).unwrap();
+    let compressed_snark_encoded = encoder.finish().unwrap();
+    println!(
+      "CompressedSNARK::len {:?} bytes",
+      compressed_snark_encoded.len()
+    );
 
     // verify the compressed SNARK
     println!("Verifying a CompressedSNARK...");

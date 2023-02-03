@@ -19,8 +19,7 @@ use crate::{
   traits::{
     circuit::StepCircuit, commitment::CommitmentTrait, Group, ROCircuitTrait, ROConstantsCircuit,
   },
-  Commitment,
-  StepCounterType,
+  Commitment, StepCounterType,
 };
 use bellperson::{
   gadgets::{
