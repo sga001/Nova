@@ -46,11 +46,14 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
   type CompressedCommitment = CompressedCommitment<G::CompressedGroupElement>;
 
   fn new(label: &'static [u8], n: usize) -> Self {
-    let h = G::from_label(label + b"blinding factor", 1).first().unwrap();
+    let mut blinding_label = label.to_vec();
+    blinding_label.extend(b"blinding factor");
+
+    let h = G::from_label(&blinding_label, 1).first().unwrap();
 
     CommitmentGens {
       gens: G::from_label(label, n.next_power_of_two()),
-      h,
+      h: *h,
       _p: Default::default(),
     }
   }
@@ -62,11 +65,11 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
   fn commit(&self, v: &[G::Scalar]) -> (Self::Commitment, G::Scalar) {
     assert!(self.gens.len() >= v.len());
 
-    let r = G::Scalar::random(&mut OsRng); //XXX: should this be a PRNG or is this OK?
+    let r = G::Scalar::random(&mut OsRng); 
     let mut scalars: Vec<G::Scalar> = v.to_vec();
     scalars.push(r.clone());
 
-    let mut bases: Vec<G::Base> = self.gens[..v.len()].to_vec();
+    let mut bases = self.gens[..v.len()].to_vec();
     bases.push(self.h.clone());
 
     let com = Commitment {
@@ -264,10 +267,12 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
     (
       CommitmentGens {
         gens: self.gens[0..n].to_vec(),
+        h: self.h.clone(),
         _p: Default::default(),
       },
       CommitmentGens {
         gens: self.gens[n..].to_vec(),
+        h: self.h.clone(),
         _p: Default::default(),
       },
     )
@@ -281,6 +286,7 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
     };
     CommitmentGens {
       gens,
+      h: self.h.clone(),
       _p: Default::default(),
     }
   }
@@ -300,6 +306,7 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
 
     CommitmentGens {
       gens,
+      h: self.h.clone(),
       _p: Default::default(),
     }
   }
@@ -315,6 +322,7 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
 
     CommitmentGens {
       gens: gens_scaled,
+      h: self.h.clone(),
       _p: Default::default(),
     }
   }
@@ -329,10 +337,11 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
       .collect::<Result<Vec<Commitment<G>>, NovaError>>()?;
     let gens = (0..d.len())
       .into_par_iter()
-      .map(|i| d[i].comm.preprocessed())
+     .map(|i| d[i].comm.preprocessed())
       .collect();
     Ok(CommitmentGens {
       gens,
+      h: G::Base::zero().preprocessed(), //XXX: Revisit when we khnow more.
       _p: Default::default(),
     })
   }
