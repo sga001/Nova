@@ -45,6 +45,7 @@ pub struct R1CSShape<G: Group> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct R1CSWitness<G: Group> {
   W: Vec<G::Scalar>,
+  r_W: G::Scalar,
 }
 
 /// A type that holds an R1CS instance
@@ -59,7 +60,9 @@ pub struct R1CSInstance<G: Group> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelaxedR1CSWitness<G: Group> {
   pub(crate) W: Vec<G::Scalar>,
+  pub(crate) r_w: G::Scalar,
   pub(crate) E: Vec<G::Scalar>,
+  pub(crate) r_E: G::Scalar,
 }
 
 /// A type that holds a Relaxed R1CS instance
@@ -208,8 +211,8 @@ impl<G: Group> R1CSShape<G> {
     // verify if comm_E and comm_W are commitments to E and W
     let res_comm: bool = {
       let (comm_W, comm_E) = rayon::join(
-        || CE::<G>::commit(&gens.gens, &W.W),
-        || CE::<G>::commit(&gens.gens, &W.E),
+        || CE::<G>::commit(&gens.gens, &W.W, &W.r_W),
+        || CE::<G>::commit(&gens.gens, &W.E, &W.r_E),
       );
       U.comm_W == comm_W && U.comm_E == comm_E
     };
@@ -247,7 +250,7 @@ impl<G: Group> R1CSShape<G> {
     };
 
     // verify if comm_W is a commitment to W
-    let res_comm: bool = U.comm_W == CE::<G>::commit(&gens.gens, &W.W);
+    let res_comm: bool = U.comm_W == CE::<G>::commit(&gens.gens, &W.W, &W.r_W);
 
     if res_eq && res_comm {
       Ok(())
@@ -265,6 +268,7 @@ impl<G: Group> R1CSShape<G> {
     W1: &RelaxedR1CSWitness<G>,
     U2: &R1CSInstance<G>,
     W2: &R1CSWitness<G>,
+    r_T: &G::Scalar,
   ) -> Result<(Vec<G::Scalar>, Commitment<G>), NovaError> {
     let (AZ_1, BZ_1, CZ_1) = {
       let Z1 = concat(vec![W1.W.clone(), vec![U1.u], U1.X.clone()]);
@@ -301,7 +305,7 @@ impl<G: Group> R1CSShape<G> {
       .map(|(((a, b), c), d)| *a + *b - *c - *d)
       .collect::<Vec<G::Scalar>>();
 
-    let comm_T = CE::<G>::commit(&gens.gens, &T);
+    let comm_T = CE::<G>::commit(&gens.gens, &T, r_T);
 
     Ok((T, comm_T))
   }
@@ -465,8 +469,8 @@ impl<G: Group> R1CSWitness<G> {
   }
 
   /// Commits to the witness using the supplied generators
-  pub fn commit(&self, gens: &R1CSGens<G>) -> Commitment<G> {
-    CE::<G>::commit(&gens.gens, &self.W)
+  pub fn commit(&self, gens: &R1CSGens<G>, r: &G::Scalar) -> Commitment<G> {
+    CE::<G>::commit(&gens.gens, &self.W, r)
   }
 }
 
@@ -522,10 +526,10 @@ impl<G: Group> RelaxedR1CSWitness<G> {
   }
 
   /// Commits to the witness using the supplied generators
-  pub fn commit(&self, gens: &R1CSGens<G>) -> (Commitment<G>, Commitment<G>) {
+  pub fn commit(&self, gens: &R1CSGens<G>, r_W: &G::Scalar, r_E: &G::Scalar) -> (Commitment<G>, Commitment<G>) {
     (
-      CE::<G>::commit(&gens.gens, &self.W),
-      CE::<G>::commit(&gens.gens, &self.E),
+      CE::<G>::commit(&gens.gens, &self.W, r_w),
+      CE::<G>::commit(&gens.gens, &self.E, r_E),
     )
   }
 
