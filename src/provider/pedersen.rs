@@ -15,9 +15,9 @@ use core::{
 };
 use ff::Field;
 use merlin::Transcript;
+use rand::rngs::OsRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use rand::rngs::OsRng;
 
 /// A type that holds commitment generators
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,7 +65,7 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
   fn commit(&self, v: &[G::Scalar]) -> (Self::Commitment, G::Scalar) {
     assert!(self.gens.len() >= v.len());
 
-    let r = G::Scalar::random(&mut OsRng); 
+    let r = G::Scalar::random(&mut OsRng);
     let mut scalars: Vec<G::Scalar> = v.to_vec();
     scalars.push(r.clone());
 
@@ -337,7 +337,7 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
       .collect::<Result<Vec<Commitment<G>>, NovaError>>()?;
     let gens = (0..d.len())
       .into_par_iter()
-     .map(|i| d[i].comm.preprocessed())
+      .map(|i| d[i].comm.preprocessed())
       .collect();
     Ok(CommitmentGens {
       gens,
