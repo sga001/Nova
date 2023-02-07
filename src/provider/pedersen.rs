@@ -17,11 +17,13 @@ use ff::Field;
 use merlin::Transcript;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use rand::rngs::OsRng;
 
 /// A type that holds commitment generators
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentGens<G: Group> {
   gens: Vec<G::PreprocessedGroupElement>,
+  h: G::PreprocessedGroupElement,
   _p: PhantomData<G>,
 }
 
@@ -44,8 +46,11 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
   type CompressedCommitment = CompressedCommitment<G::CompressedGroupElement>;
 
   fn new(label: &'static [u8], n: usize) -> Self {
+    let h = G::from_label(label + b"blinding factor", 1).first().unwrap();
+
     CommitmentGens {
       gens: G::from_label(label, n.next_power_of_two()),
+      h,
       _p: Default::default(),
     }
   }
@@ -54,11 +59,21 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
     self.gens.len()
   }
 
-  fn commit(&self, v: &[G::Scalar]) -> Self::Commitment {
+  fn commit(&self, v: &[G::Scalar]) -> (Self::Commitment, G::Scalar) {
     assert!(self.gens.len() >= v.len());
-    Commitment {
-      comm: G::vartime_multiscalar_mul(v, &self.gens[..v.len()]),
-    }
+
+    let r = G::Scalar::random(&mut OsRng); //XXX: should this be a PRNG or is this OK?
+    let mut scalars: Vec<G::Scalar> = v.to_vec();
+    scalars.push(r.clone());
+
+    let mut bases: Vec<G::Base> = self.gens[..v.len()].to_vec();
+    bases.push(self.h.clone());
+
+    let com = Commitment {
+      comm: G::vartime_multiscalar_mul(&scalars, &bases),
+    };
+
+    (com, r)
   }
 }
 
@@ -212,7 +227,7 @@ impl<G: Group> CommitmentEngineTrait<G> for CommitmentEngine<G> {
   type Commitment = Commitment<G>;
   type CompressedCommitment = CompressedCommitment<G::CompressedGroupElement>;
 
-  fn commit(gens: &Self::CommitmentGens, v: &[G::Scalar]) -> Self::Commitment {
+  fn commit(gens: &Self::CommitmentGens, v: &[G::Scalar]) -> (Self::Commitment, G::Scalar) {
     gens.commit(v)
   }
 }
