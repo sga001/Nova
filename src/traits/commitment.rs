@@ -28,7 +28,7 @@ pub trait CommitmentGensTrait<G: Group>:
   fn len(&self) -> usize;
 
   /// Commits to a vector using the commitment key
-  fn commit(&self, v: &[G::Scalar]) -> (Self::Commitment, G::Scalar);
+  fn commit(&self, v: &[G::Scalar], r: &G::Scalar) -> Self::Commitment;
 }
 
 /// Defines basic operations on commitments
@@ -126,5 +126,5 @@ pub trait CommitmentEngineTrait<G: Group>:
   >;
 
   /// Commits to the provided vector using the provided generators
-  fn commit(gens: &Self::CommitmentGens, v: &[G::Scalar]) -> (Self::Commitment, G::Scalar);
+  fn commit(gens: &Self::CommitmentGens, v: &[G::Scalar], r: &G::Scalar) -> Self::Commitment;
 }

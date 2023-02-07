@@ -15,7 +15,6 @@ use core::{
 };
 use ff::Field;
 use merlin::Transcript;
-use rand::rngs::OsRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -62,10 +61,9 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
     self.gens.len()
   }
 
-  fn commit(&self, v: &[G::Scalar]) -> (Self::Commitment, G::Scalar) {
+  fn commit(&self, v: &[G::Scalar], r: &G::Scalar) -> Self::Commitment {
     assert!(self.gens.len() >= v.len());
 
-    let r = G::Scalar::random(&mut OsRng);
     let mut scalars: Vec<G::Scalar> = v.to_vec();
     scalars.push(r.clone());
 
@@ -76,7 +74,7 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
       comm: G::vartime_multiscalar_mul(&scalars, &bases),
     };
 
-    (com, r)
+    com
   }
 }
 
@@ -230,8 +228,8 @@ impl<G: Group> CommitmentEngineTrait<G> for CommitmentEngine<G> {
   type Commitment = Commitment<G>;
   type CompressedCommitment = CompressedCommitment<G::CompressedGroupElement>;
 
-  fn commit(gens: &Self::CommitmentGens, v: &[G::Scalar]) -> (Self::Commitment, G::Scalar) {
-    gens.commit(v)
+  fn commit(gens: &Self::CommitmentGens, v: &[G::Scalar], r: &G::Scalar) -> Self::Commitment {
+    gens.commit(v, r)
   }
 }
 
@@ -341,7 +339,7 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
       .collect();
     Ok(CommitmentGens {
       gens,
-      h: G::Base::zero().preprocessed(), //XXX: Revisit when we khnow more.
+      h: *G::from_label(b"dummy", 1).first().unwrap(), //XXX: Revisit when we know more.
       _p: Default::default(),
     })
   }
