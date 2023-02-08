@@ -18,6 +18,7 @@ use ff::Field;
 use flate2::{write::ZlibEncoder, Compression};
 use itertools::concat;
 use merlin::Transcript;
+use rand::rngs::OsRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
@@ -44,8 +45,8 @@ pub struct R1CSShape<G: Group> {
 /// A type that holds a witness for a given R1CS instance
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct R1CSWitness<G: Group> {
-  W: Vec<G::Scalar>,
-  r_W: G::Scalar,
+  pub(crate) W: Vec<G::Scalar>,
+  pub(crate) r_W: G::Scalar,
 }
 
 /// A type that holds an R1CS instance
@@ -60,7 +61,7 @@ pub struct R1CSInstance<G: Group> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelaxedR1CSWitness<G: Group> {
   pub(crate) W: Vec<G::Scalar>,
-  pub(crate) r_w: G::Scalar,
+  pub(crate) r_W: G::Scalar,
   pub(crate) E: Vec<G::Scalar>,
   pub(crate) r_E: G::Scalar,
 }
@@ -464,13 +465,16 @@ impl<G: Group> R1CSWitness<G> {
     if S.num_vars != W.len() {
       Err(NovaError::InvalidWitnessLength)
     } else {
-      Ok(R1CSWitness { W: W.to_owned() })
+      Ok(R1CSWitness {
+        W: W.to_owned(),
+        r_W: G::Scalar::random(&mut OsRng),
+      })
     }
   }
 
   /// Commits to the witness using the supplied generators
-  pub fn commit(&self, gens: &R1CSGens<G>, r: &G::Scalar) -> Commitment<G> {
-    CE::<G>::commit(&gens.gens, &self.W, r)
+  pub fn commit(&self, gens: &R1CSGens<G>) -> Commitment<G> {
+    CE::<G>::commit(&gens.gens, &self.W, &self.r_W)
   }
 }
 
@@ -513,7 +517,9 @@ impl<G: Group> RelaxedR1CSWitness<G> {
   pub fn default(S: &R1CSShape<G>) -> RelaxedR1CSWitness<G> {
     RelaxedR1CSWitness {
       W: vec![G::Scalar::zero(); S.num_vars],
+      r_W: G::Scalar::random(&mut OsRng),
       E: vec![G::Scalar::zero(); S.num_cons],
+      r_E: G::Scalar::random(&mut OsRng),
     }
   }
 
@@ -521,15 +527,17 @@ impl<G: Group> RelaxedR1CSWitness<G> {
   pub fn from_r1cs_witness(S: &R1CSShape<G>, witness: &R1CSWitness<G>) -> RelaxedR1CSWitness<G> {
     RelaxedR1CSWitness {
       W: witness.W.clone(),
+      r_W: witness.r_W.clone(),
       E: vec![G::Scalar::zero(); S.num_cons],
+      r_E: G::Scalar::random(&mut OsRng),
     }
   }
 
   /// Commits to the witness using the supplied generators
-  pub fn commit(&self, gens: &R1CSGens<G>, r_W: &G::Scalar, r_E: &G::Scalar) -> (Commitment<G>, Commitment<G>) {
+  pub fn commit(&self, gens: &R1CSGens<G>) -> (Commitment<G>, Commitment<G>) {
     (
-      CE::<G>::commit(&gens.gens, &self.W, r_w),
-      CE::<G>::commit(&gens.gens, &self.E, r_E),
+      CE::<G>::commit(&gens.gens, &self.W, &self.r_W),
+      CE::<G>::commit(&gens.gens, &self.E, &self.r_E),
     )
   }
 
@@ -538,26 +546,31 @@ impl<G: Group> RelaxedR1CSWitness<G> {
     &self,
     W2: &R1CSWitness<G>,
     T: &[G::Scalar],
+    r_T: &G::Scalar,
     r: &G::Scalar,
   ) -> Result<RelaxedR1CSWitness<G>, NovaError> {
-    let (W1, E1) = (&self.W, &self.E);
-    let W2 = &W2.W;
+    let (W1, r_W1, E1, r_E1) = (&self.W, &self.r_W, &self.E, &self.r_E);
 
-    if W1.len() != W2.len() {
+    if W1.len() != W2.W.len() {
       return Err(NovaError::InvalidWitnessLength);
     }
 
     let W = W1
       .par_iter()
-      .zip(W2)
+      .zip(&W2.W)
       .map(|(a, b)| *a + *r * *b)
       .collect::<Vec<G::Scalar>>();
+
     let E = E1
       .par_iter()
       .zip(T)
       .map(|(a, b)| *a + *r * *b)
       .collect::<Vec<G::Scalar>>();
-    Ok(RelaxedR1CSWitness { W, E })
+
+    let r_W = *r_W1 + *r * W2.r_W;
+    let r_E = *r_E1 + *r * *r_T;
+
+    Ok(RelaxedR1CSWitness { W, r_W, E, r_E })
   }
 
   /// Pads the provided witness to the correct length
@@ -574,7 +587,12 @@ impl<G: Group> RelaxedR1CSWitness<G> {
       E
     };
 
-    Self { W, E }
+    Self {
+      W,
+      r_W: self.r_W.clone(),
+      E,
+      r_E: self.r_E.clone(),
+    }
   }
 }
 
