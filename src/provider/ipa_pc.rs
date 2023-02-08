@@ -22,8 +22,8 @@ use std::marker::PhantomData;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct EvaluationGens<G: Group> {
-  gens_v: CommitmentGens<G>, 
-  gens_s: CommitmentGens<G>, //XXX: generator for scalars
+  gens_v: CommitmentGens<G>, // This is a generator for vectors
+  gens_s: CommitmentGens<G>, // This is a generator for scalars
 }
 
 /// Provides an implementation of a polynomial evaluation argument
@@ -81,6 +81,7 @@ where
 
     for i in 1..polys.len() {
       let (n, u, w) = NIFSForInnerProduct::prove(
+        &gens,
         &r_U,
         &r_W,
         &InnerProductInstance::new(
@@ -163,15 +164,15 @@ where
 pub struct InnerProductInstance<G: Group> {
   comm_a_vec: Commitment<G>,
   b_vec: Vec<G::Scalar>,
-  c: G::Scalar, //XXX: this needs to be a commitment as well
+  comm_c: Commitment<G>, // commitment to scalar c
 }
 
 impl<G: Group> InnerProductInstance<G> {
-  fn new(comm_a_vec: &Commitment<G>, b_vec: &[G::Scalar], c: &G::Scalar) -> Self {
+  fn new(comm_a_vec: &Commitment<G>, b_vec: &[G::Scalar], comm_c: &Commitment<G>) -> Self {
     InnerProductInstance {
       comm_a_vec: *comm_a_vec,
       b_vec: b_vec.to_vec(),
-      c: *c,
+      comm_c: *comm_c,
     }
   }
 
@@ -181,33 +182,41 @@ impl<G: Group> InnerProductInstance<G> {
     InnerProductInstance {
       comm_a_vec: self.comm_a_vec,
       b_vec,
-      c: self.c,
+      comm_c: self.comm_c,
     }
   }
 }
 
 struct InnerProductWitness<G: Group> {
   a_vec: Vec<G::Scalar>,
+//  c: G::Scalar,
+//  r_c: G::Scalar, // blind used for c
 }
 
 impl<G: Group> InnerProductWitness<G> {
-  fn new(a_vec: &[G::Scalar]) -> Self {
+  fn new(a_vec: &[G::Scalar], c: &G::Scalar, r_c: &G::Scalar) -> Self {
     InnerProductWitness {
       a_vec: a_vec.to_vec(),
+//      c: *c,
+//      r_c: *r_c,
     }
   }
 
   fn pad(&self, n: usize) -> InnerProductWitness<G> {
     let mut a_vec = self.a_vec.clone();
     a_vec.resize(n, G::Scalar::zero());
-    InnerProductWitness { a_vec }
+    InnerProductWitness { 
+      a_vec,
+//      c: self.c,
+//      r_c: self.r_c
+    }
   }
 }
 
 /// A non-interactive folding scheme (NIFS) for inner product relations
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NIFSForInnerProduct<G: Group> {
-  cross_term: G::Scalar, //XXX: this needs to be a commitment
+  comm_cross_term: Commitment<G>, // commitment to cross term (which is a scalar)
 }
 
 impl<G: Group> NIFSForInnerProduct<G> {
@@ -216,6 +225,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
   }
 
   fn prove(
+    gens: &EvaluationGens<G>,
     U1: &InnerProductInstance<G>,
     W1: &InnerProductWitness<G>,
     U2: &InnerProductInstance<G>,
@@ -239,12 +249,14 @@ impl<G: Group> NIFSForInnerProduct<G> {
     U2.b_vec.append_to_transcript(b"U2_b_vec", transcript);
 
     // compute the cross-term
-    //XXX: I need to commit to this cross term and make it hiding. Add commitment to
-    //transcript instead of the cross term itself
     let cross_term = inner_product(&W1.a_vec, &U2.b_vec) + inner_product(&W2.a_vec, &U1.b_vec);
 
-    // add the cross-term to the transcript
-    cross_term.append_to_transcript(b"cross_term", transcript);
+    // commit to the cross-term
+    let r_cross = G::Scalar::random(&mut OsRng); 
+    let comm_cross = CE::<G>::commit(&gens.gen_s, &cross_term, &r_cross);
+ 
+    // add the commitment of the cross-term to the transcript
+    comm_cross.append_to_transcript(b"cross_term", transcript);
 
     // obtain a random challenge
     let r = G::Scalar::challenge(b"r", transcript);
@@ -263,21 +275,18 @@ impl<G: Group> NIFSForInnerProduct<G> {
       .map(|(a1, a2)| *a1 + r * a2)
       .collect::<Vec<G::Scalar>>();
 
-
-    //XXX: fold using the commitment to cross_term
-
-    let c = U1.c + r * r * U2.c + r * cross_term;
+    // fold using the commitment to the cross term and fold a_vec as well
+    let comm_c = U1.comm_c + r * r * U2.comm_c + r * comm_cross;
     let comm_a_vec = U1.comm_a_vec + U2.comm_a_vec * r;
 
     let W = InnerProductWitness { a_vec };
     let U = InnerProductInstance {
       comm_a_vec,
       b_vec,
-      c,
+      comm_c,
     };
 
-    //XXX: add commitment to cross term not cros term itself
-    (NIFSForInnerProduct { cross_term }, U, W)
+    (NIFSForInnerProduct { comm_cross_term: comm_cross }, U, W)
   }
 
   fn verify(
@@ -300,9 +309,9 @@ impl<G: Group> NIFSForInnerProduct<G> {
       .append_to_transcript(b"U2_comm_a_vec", transcript);
     U2.b_vec.append_to_transcript(b"U2_b_vec", transcript);
 
-    // add the cross-term to the transcript
+    // add the commitment to the cross-term to the transcript
     self
-      .cross_term
+      .comm_cross_term
       .append_to_transcript(b"cross_term", transcript);
 
     // obtain a random challenge
@@ -316,14 +325,13 @@ impl<G: Group> NIFSForInnerProduct<G> {
       .map(|(a1, a2)| *a1 + r * a2)
       .collect::<Vec<G::Scalar>>();
 
-   //XXX: U1.C and U2.c will now be commitments but operation can still happen
-    let c = U1.c + r * r * U2.c + r * self.cross_term;
+    let comm_c = U1.comm_c + r * r * U2.comm_c + r * self.comm_cross_term;
     let comm_a_vec = U1.comm_a_vec + U2.comm_a_vec * r;
 
     InnerProductInstance {
       comm_a_vec,
       b_vec,
-      c,
+      comm_c,
     }
   }
 }
@@ -347,9 +355,11 @@ where
     b"inner product argument"
   }
 
+
+  //XXX: this one is missing
   fn prove(
     gens: &CommitmentGens<G>,
-    gens_c: &CommitmentGens<G>,
+    gens_c: &CommitmentGens<G>, 
     U: &InnerProductInstance<G>,
     W: &InnerProductWitness<G>,
     transcript: &mut Transcript,
@@ -362,8 +372,7 @@ where
 
     U.comm_a_vec.append_to_transcript(b"comm_a_vec", transcript);
     U.b_vec.append_to_transcript(b"b_vec", transcript);
-    //XXX: this would append a commitment instead of U.c
-    U.c.append_to_transcript(b"c", transcript);
+    U.comm_c.append_to_transcript(b"c", transcript);
 
     // sample a random base for commiting to the inner product
     let r = G::Scalar::challenge(b"r", transcript);
@@ -479,19 +488,13 @@ where
 
     U.comm_a_vec.append_to_transcript(b"comm_a_vec", transcript);
     U.b_vec.append_to_transcript(b"b_vec", transcript);
-    U.c.append_to_transcript(b"c", transcript);
+    U.comm_c.append_to_transcript(b"c", transcript);
 
-
-
-    //XXX: no need for verifier to produce commitment for U.c, because
-    // U.c is already a commitment once we make changes.
-    // Instead of stuff below, you multiply U.c (commitment) by r to do the scaling above.
-    
-    // sample a random base for commiting to the inner product
+    // sample a random base for scaling commitment
     let r = G::Scalar::challenge(b"r", transcript);
     let gens_c = gens_c.scale(&r);
 
-    let P = U.comm_a_vec + CE::<G>::commit(&gens_c, &[U.c]);
+    let P = U.comm_a_vec + U.comm_c * r;
 
     let batch_invert = |v: &[G::Scalar]| -> Result<Vec<G::Scalar>, NovaError> {
       let mut products = vec![G::Scalar::zero(); v.len()];
