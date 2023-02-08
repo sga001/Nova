@@ -22,8 +22,8 @@ use std::marker::PhantomData;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct EvaluationGens<G: Group> {
-  gens_v: CommitmentGens<G>,
-  gens_s: CommitmentGens<G>,
+  gens_v: CommitmentGens<G>, 
+  gens_s: CommitmentGens<G>, //XXX: generator for scalars
 }
 
 /// Provides an implementation of a polynomial evaluation argument
@@ -62,7 +62,8 @@ where
     comms: &[Commitment<G>],
     polys: &[Vec<G::Scalar>],
     points: &[Vec<G::Scalar>],
-    evals: &[G::Scalar],
+    evals: &[G::Scalar], //XXX: but they need to be committed to and return the commitments and
+                         //blinds
   ) -> Result<Self::EvaluationArgument, NovaError> {
     // sanity checks (these should never fail)
     assert!(polys.len() >= 2);
@@ -162,7 +163,7 @@ where
 pub struct InnerProductInstance<G: Group> {
   comm_a_vec: Commitment<G>,
   b_vec: Vec<G::Scalar>,
-  c: G::Scalar,
+  c: G::Scalar, //XXX: this needs to be a commitment as well
 }
 
 impl<G: Group> InnerProductInstance<G> {
@@ -206,7 +207,7 @@ impl<G: Group> InnerProductWitness<G> {
 /// A non-interactive folding scheme (NIFS) for inner product relations
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NIFSForInnerProduct<G: Group> {
-  cross_term: G::Scalar,
+  cross_term: G::Scalar, //XXX: this needs to be a commitment
 }
 
 impl<G: Group> NIFSForInnerProduct<G> {
@@ -238,6 +239,8 @@ impl<G: Group> NIFSForInnerProduct<G> {
     U2.b_vec.append_to_transcript(b"U2_b_vec", transcript);
 
     // compute the cross-term
+    //XXX: I need to commit to this cross term and make it hiding. Add commitment to
+    //transcript instead of the cross term itself
     let cross_term = inner_product(&W1.a_vec, &U2.b_vec) + inner_product(&W2.a_vec, &U1.b_vec);
 
     // add the cross-term to the transcript
@@ -260,6 +263,9 @@ impl<G: Group> NIFSForInnerProduct<G> {
       .map(|(a1, a2)| *a1 + r * a2)
       .collect::<Vec<G::Scalar>>();
 
+
+    //XXX: fold using the commitment to cross_term
+
     let c = U1.c + r * r * U2.c + r * cross_term;
     let comm_a_vec = U1.comm_a_vec + U2.comm_a_vec * r;
 
@@ -270,6 +276,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
       c,
     };
 
+    //XXX: add commitment to cross term not cros term itself
     (NIFSForInnerProduct { cross_term }, U, W)
   }
 
@@ -308,6 +315,8 @@ impl<G: Group> NIFSForInnerProduct<G> {
       .zip(U2.b_vec.par_iter())
       .map(|(a1, a2)| *a1 + r * a2)
       .collect::<Vec<G::Scalar>>();
+
+   //XXX: U1.C and U2.c will now be commitments but operation can still happen
     let c = U1.c + r * r * U2.c + r * self.cross_term;
     let comm_a_vec = U1.comm_a_vec + U2.comm_a_vec * r;
 
@@ -353,6 +362,7 @@ where
 
     U.comm_a_vec.append_to_transcript(b"comm_a_vec", transcript);
     U.b_vec.append_to_transcript(b"b_vec", transcript);
+    //XXX: this would append a commitment instead of U.c
     U.c.append_to_transcript(b"c", transcript);
 
     // sample a random base for commiting to the inner product
@@ -471,6 +481,12 @@ where
     U.b_vec.append_to_transcript(b"b_vec", transcript);
     U.c.append_to_transcript(b"c", transcript);
 
+
+
+    //XXX: no need for verifier to produce commitment for U.c, because
+    // U.c is already a commitment once we make changes.
+    // Instead of stuff below, you multiply U.c (commitment) by r to do the scaling above.
+    
     // sample a random base for commiting to the inner product
     let r = G::Scalar::challenge(b"r", transcript);
     let gens_c = gens_c.scale(&r);
