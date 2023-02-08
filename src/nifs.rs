@@ -14,6 +14,8 @@ use crate::{
 };
 use core::marker::PhantomData;
 use serde::{Deserialize, Serialize};
+use rand::rngs::OsRng;
+use ff::Field;
 
 /// A SNARK that holds the proof of a step of an incremental computation
 #[allow(clippy::upper_case_acronyms)]
@@ -54,7 +56,8 @@ impl<G: Group> NIFS<G> {
     U2.absorb_in_ro(&mut ro);
 
     // compute a commitment to the cross-term
-    let (T, comm_T) = S.commit_T(gens, U1, W1, U2, W2)?;
+    let r_T = G::Scalar::random(&mut OsRng); //XXX: check whether we need to track r_T elsewhere
+    let (T, comm_T) = S.commit_T(gens, U1, W1, U2, W2, &r_T)?;
 
     // append `comm_T` to the transcript and obtain a challenge
     comm_T.absorb_in_ro(&mut ro);
@@ -66,7 +69,7 @@ impl<G: Group> NIFS<G> {
     let U = U1.fold(U2, &comm_T, &r)?;
 
     // fold the witness using `r` and `T`
-    let W = W1.fold(W2, &T, &r)?;
+    let W = W1.fold(W2, &T, &r_T, &r)?;
 
     // return the folded instance and witness
     Ok((
