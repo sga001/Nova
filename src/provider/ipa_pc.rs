@@ -17,6 +17,7 @@ use merlin::Transcript;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
+use rand::rngs::OsRng;
 
 /// Provides an implementation of generators for proving evaluations
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -62,8 +63,7 @@ where
     comms: &[Commitment<G>],
     polys: &[Vec<G::Scalar>],
     points: &[Vec<G::Scalar>],
-    evals: &[G::Scalar], //XXX: but they need to be committed to and return the commitments and
-                         //blinds
+    evals: &[G::Scalar], 
   ) -> Result<Self::EvaluationArgument, NovaError> {
     // sanity checks (these should never fail)
     assert!(polys.len() >= 2);
@@ -71,33 +71,48 @@ where
     assert_eq!(comms.len(), points.len());
     assert_eq!(comms.len(), evals.len());
 
-    let mut r_U = InnerProductInstance::new(
+    // Need to commit to evals (which are basically "c"). 
+    // Then pass evals and blinding factors to InnerProductWitness 
+    // and pass commitments to InnerProductInstance
+
+    // Commit to eval[0]
+    let r_eval_0 = G::Scalar::random(&mut OsRng); 
+    let comm_eval_0 = CE::<G>::commit(&gens.gen_s, &evals[0], &r_eval_0);
+
+    let mut U_folded = InnerProductInstance::new(
       &comms[0],
       &EqPolynomial::new(points[0].clone()).evals(),
-      &evals[0],
+      &comm_eval_0,
     );
-    let mut r_W = InnerProductWitness::new(&polys[0]);
+
+    // Record value of eval and randomness used in commitment in the witness
+    let mut W_folded = InnerProductWitness::new(&polys[0], &eval[0], &r_eval_0);
     let mut nifs = Vec::new();
 
     for i in 1..polys.len() {
+      // Commit to eval[i]
+      let r_eval_i = G::Scalar::random(&mut OsRng); 
+      let comm_eval_i = CE::<G>::commit(&gens.gen_s, &evals[i], &r_eval_i);
+
+      // perform the folding
       let (n, u, w) = NIFSForInnerProduct::prove(
         &gens,
-        &r_U,
-        &r_W,
+        &U_folded,
+        &W_folded,
         &InnerProductInstance::new(
           &comms[i],
           &EqPolynomial::new(points[i].clone()).evals(),
-          &evals[i],
+          &comm_eval_i,
         ),
-        &InnerProductWitness::new(&polys[i]),
+        &InnerProductWitness::new(&polys[i], &evals[i], &r_eval_i),
         transcript,
       );
       nifs.push(n);
-      r_U = u;
-      r_W = w;
+      U_folded = u;
+      W_folded = w;
     }
 
-    let ipa = InnerProductArgument::prove(&gens.gens_v, &gens.gens_s, &r_U, &r_W, transcript)?;
+    let ipa = InnerProductArgument::prove(&gens.gens_v, &gens.gens_s, &U_folded, &W_folded, transcript)?;
 
     Ok(EvaluationArgument { nifs, ipa })
   }
@@ -108,31 +123,31 @@ where
     transcript: &mut Transcript,
     comms: &[Commitment<G>],
     points: &[Vec<G::Scalar>],
-    evals: &[G::Scalar],
+    comm_evals: &[Commitment<G>],
     arg: &Self::EvaluationArgument,
   ) -> Result<(), NovaError> {
     // sanity checks (these should never fail)
     assert!(comms.len() >= 2);
     assert_eq!(comms.len(), points.len());
-    assert_eq!(comms.len(), evals.len());
+    assert_eq!(comms.len(), comm_evals.len());
 
-    let mut r_U = InnerProductInstance::new(
+    let mut U_folded = InnerProductInstance::new(
       &comms[0],
       &EqPolynomial::new(points[0].clone()).evals(),
-      &evals[0],
+      &comm_evals[0],
     );
     let mut num_vars = points[0].len();
     for i in 1..comms.len() {
       let u = arg.nifs[i - 1].verify(
-        &r_U,
+        &U_folded,
         &InnerProductInstance::new(
           &comms[i],
           &EqPolynomial::new(points[i].clone()).evals(),
-          &evals[i],
+          &comm_evals[i],
         ),
         transcript,
       );
-      r_U = u;
+      U_folded = u;
       num_vars = max(num_vars, points[i].len());
     }
 
@@ -140,7 +155,7 @@ where
       &gens.gens_v,
       &gens.gens_s,
       (2_usize).pow(num_vars as u32),
-      &r_U,
+      &U_folded,
       transcript,
     )?;
 
@@ -189,16 +204,16 @@ impl<G: Group> InnerProductInstance<G> {
 
 struct InnerProductWitness<G: Group> {
   a_vec: Vec<G::Scalar>,
-//  c: G::Scalar,
-//  r_c: G::Scalar, // blind used for c
+  c: G::Scalar,
+  r_c: G::Scalar, // blind used for c
 }
 
 impl<G: Group> InnerProductWitness<G> {
   fn new(a_vec: &[G::Scalar], c: &G::Scalar, r_c: &G::Scalar) -> Self {
     InnerProductWitness {
       a_vec: a_vec.to_vec(),
-//      c: *c,
-//      r_c: *r_c,
+      c: *c,
+      r_c: *r_c,
     }
   }
 
@@ -207,8 +222,8 @@ impl<G: Group> InnerProductWitness<G> {
     a_vec.resize(n, G::Scalar::zero());
     InnerProductWitness { 
       a_vec,
-//      c: self.c,
-//      r_c: self.r_c
+      c: self.c,
+      r_c: self.r_c
     }
   }
 }
@@ -275,11 +290,20 @@ impl<G: Group> NIFSForInnerProduct<G> {
       .map(|(a1, a2)| *a1 + r * a2)
       .collect::<Vec<G::Scalar>>();
 
-    // fold using the commitment to the cross term and fold a_vec as well
-    let comm_c = U1.comm_c + r * r * U2.comm_c + r * comm_cross;
+    // fold using the cross term and fold a_vec as well
+    let c = W1.c + r * r * W2.c + r * cross_term;
     let comm_a_vec = U1.comm_a_vec + U2.comm_a_vec * r;
 
-    let W = InnerProductWitness { a_vec };
+    // generate commitment to c
+    let r_c = G::Scalar::random(&mut OsRng);
+    let comm_c = CE::<G>::commit(&gens.gen_s, &c, &r_c);
+
+    let W = InnerProductWitness { 
+      a_vec,
+      c,
+      r_c,
+    };
+
     let U = InnerProductInstance {
       comm_a_vec,
       b_vec,
