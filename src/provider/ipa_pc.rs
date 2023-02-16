@@ -86,7 +86,7 @@ where
     );
 
     // Record value of eval and randomness used in commitment in the witness
-    let mut W_folded = InnerProductWitness::new(&polys[0], &eval[0], &r_eval_0);
+    let mut W_folded = InnerProductWitness::new(&polys[0], &evals[0], &r_eval_0);
     let mut nifs = Vec::new();
 
     for i in 1..polys.len() {
