@@ -76,6 +76,14 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
 
     com
   }
+
+  fn get_gens(&self) -> Vec<G::PreprocessedGroupElement> {
+    self.gens.clone()
+  }
+
+  fn get_blinding_gen(&self) -> G::PreprocessedGroupElement {
+    self.h.clone()
+  }
 }
 
 impl<G: Group> CommitmentTrait<G> for Commitment<G> {
@@ -249,13 +257,6 @@ pub(crate) trait CommitmentGensExtTrait<G: Group>: CommitmentGensTrait<G> {
 
   /// Scales the commitment key using the provided scalar
   fn scale(&self, r: &G::Scalar) -> Self;
-
-  /// Reinterprets commitments as commitment keys
-  fn reinterpret_commitments_as_gens(
-    c: &[<<Self as CommitmentGensExtTrait<G>>::CE as CommitmentEngineTrait<G>>::CompressedCommitment],
-  ) -> Result<Self, NovaError>
-  where
-    Self: Sized;
 }
 
 impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
@@ -318,31 +319,10 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
       .map(|g| G::vartime_multiscalar_mul(&[*r], &[g]).preprocessed())
       .collect();
 
-     let h_scaled = G::vartime_multiscalar_mul(&[*r], &[self.h.clone()]).preprocessed();
-
     CommitmentGens {
       gens: gens_scaled,
-      h: h_scaled, 
+      h: self.h,
       _p: Default::default(),
     }
-  }
-
-  /// reinterprets a vector of commitments as a set of generators
-  fn reinterpret_commitments_as_gens(
-    c: &[CompressedCommitment<G::CompressedGroupElement>],
-  ) -> Result<Self, NovaError> {
-    let d = (0..c.len())
-      .into_par_iter()
-      .map(|i| c[i].decompress())
-      .collect::<Result<Vec<Commitment<G>>, NovaError>>()?;
-    let gens = (0..d.len())
-      .into_par_iter()
-      .map(|i| d[i].comm.preprocessed())
-      .collect();
-    Ok(CommitmentGens {
-      gens,
-      h: *G::from_label(b"dummy", 1).first().unwrap(), //XXX: Revisit when we know more.
-      _p: Default::default(),
-    })
   }
 }

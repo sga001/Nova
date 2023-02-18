@@ -29,6 +29,12 @@ pub trait CommitmentGensTrait<G: Group>:
 
   /// Commits to a vector using the commitment key
   fn commit(&self, v: &[G::Scalar], r: &G::Scalar) -> Self::Commitment;
+
+  /// Returns the generators of the commitment
+  fn get_gens(&self) -> Vec<G::PreprocessedGroupElement>;
+
+  /// Returns the blinding generator of the commitment
+  fn get_blinding_gen(&self) -> G::PreprocessedGroupElement;
 }
 
 /// Defines basic operations on commitments

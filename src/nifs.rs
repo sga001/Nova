@@ -13,9 +13,9 @@ use crate::{
   CompressedCommitment,
 };
 use core::marker::PhantomData;
-use serde::{Deserialize, Serialize};
-use rand::rngs::OsRng;
 use ff::Field;
+use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
 
 /// A SNARK that holds the proof of a step of an incremental computation
 #[allow(clippy::upper_case_acronyms)]
