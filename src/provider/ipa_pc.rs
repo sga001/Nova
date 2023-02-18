@@ -375,6 +375,8 @@ impl<G: Group> NIFSForInnerProduct<G> {
 struct InnerProductArgument<G: Group> {
   P_L_vec: Vec<CompressedCommitment<G>>,
   P_R_vec: Vec<CompressedCommitment<G>>,
+  delta: CompressedCommitment<G>,
+  beta: CompressedCommitment<G>,
   z_1: G::Scalar,
   z_2: G::Scalar,
   _p: PhantomData<G>,
@@ -573,7 +575,7 @@ where
       &r_beta,
     ).compress();
 
-    let chal = G::Scalar::challenge(b"chal_bullet", transcript);
+    let chal = G::Scalar::challenge(b"chal_z", transcript);
     
     let z_1 = d + chal * y_hat;
     let z_2 = a_hat * (chal * r_P_hat + r_beta) + r_delta;
@@ -582,6 +584,8 @@ where
     Ok(InnerProductArgument {
       P_L_vec,
       P_R_vec,
+      delta,
+      beta,
       z_1,
       z_2,
       _p: Default::default(),
@@ -613,6 +617,7 @@ where
     let chal = G::Scalar::challenge(b"r", transcript);
     let gens_y = gens_y.scale(&chal);
 
+    // Scaling to be compatible with Bulletproofs figure 1
     let P = U.comm_x_vec + U.comm_y * chal;
 
     let batch_invert = |v: &[G::Scalar]| -> Result<Vec<G::Scalar>, NovaError> {
@@ -656,7 +661,9 @@ where
       .into_par_iter()
       .map(|i| chal[i] * chal[i])
       .collect();
+
     let chal_inverse = batch_invert(&chal)?;
+
     let chal_inverse_square: Vec<G::Scalar> = (0..self.L_vec.len())
       .into_par_iter()
       .map(|i| chal_inverse[i] * chal_inverse[i])
@@ -679,6 +686,8 @@ where
       s
     };
 
+    //TODO: cannot generate gens like this
+    // I'm missing step 2 in bullet-reduce to ecover P_L[i] and P_R[i] and further
     let gens_hat = {
       let y = CE::<G>::commit(gens, &s).compress();
       CommitmentGens::<G>::reinterpret_commitments_as_gens(&[y])?
