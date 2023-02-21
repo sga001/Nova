@@ -5,7 +5,7 @@ use crate::{
   provider::pedersen::CommitmentGensExtTrait,
   spartan::polynomial::EqPolynomial,
   traits::{
-    commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait},
+    commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait},
     evaluation::EvaluationEngineTrait,
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
@@ -361,7 +361,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
       .map(|(x1, x2)| *x1 + r * x2)
       .collect::<Vec<G::Scalar>>();
 
-    let comm_y = U1.comm_y + r * r * U2.comm_y + r * self.comm_cross_term;
+    let comm_y = U1.comm_y + U2.comm_y * r * r + self.comm_cross_term * r;
     let comm_x_vec = U1.comm_x_vec + U2.comm_x_vec * r;
 
     InnerProductInstance {
@@ -395,7 +395,7 @@ where
   }
 
   fn bullet_reduce_prover(
-    P: CompressedCommitment<G>,
+    P: &Commitment<G>,
     r_P: &G::Scalar,
     x_vec: &[G::Scalar],
     a_vec: &[G::Scalar],
@@ -405,10 +405,10 @@ where
     transcript: &mut Transcript,
   ) -> Result<
     (
-      CompressedCommitment<G>, // P'
+      Commitment<G>,           // P'
       G::Scalar,               // r_P'
-      CompressedCommitment<G>, // P_L
-      CompressedCommitment<G>, // P_R
+      Commitment<G>,           // P_L
+      Commitment<G>,           // P_R
       G::Scalar,               // y_prime
       Vec<G::Scalar>,          // x_vec'
       Vec<G::Scalar>,          // a_vec'
@@ -433,8 +433,7 @@ where
         .copied()
         .collect::<Vec<G::Scalar>>(),
       &r_L,
-    )
-    .compress();
+    );
 
     let P_R = CE::<G>::commit(
       &gens_L.combine(&gens_y),
@@ -444,8 +443,8 @@ where
         .copied()
         .collect::<Vec<G::Scalar>>(),
       &r_R,
-    )
-    .compress();
+    );
+
 
     P_L.append_to_transcript(b"L", transcript);
     P_R.append_to_transcript(b"R", transcript);
@@ -487,15 +486,15 @@ where
   }
 
   fn bullet_reduce_verifier(
-    P: CompressedCommitment<G>,
-    P_L: CompressedCommitment<G>,
-    P_R: CompressedCommitment<G>,
+    P: &Commitment<G>,
+    P_L: &Commitment<G>,
+    P_R: &Commitment<G>,
     a_vec: &[G::Scalar],
     gens: &CommitmentGens<G>,
     transcript: &mut Transcript,
   ) -> Result<
     (
-      CompressedCommitment<G>, // P'
+      Commitment<G>,           // P'
       Vec<G::Scalar>,          // a_vec'
       CommitmentGens<G>,       // gens'
     ),
@@ -522,7 +521,7 @@ where
       .map(|(a_L, a_R)| *a_L * chal_inverse + chal * *a_R)
       .collect::<Vec<G::Scalar>>();
 
-    let P_prime = P_L * chal_square + P + P_R * chal_inverse_square;
+    let P_prime = P_L.clone() * chal_square + P.clone() + P_R.clone() * chal_inverse_square;
 
     Ok((P_prime, a_vec_prime, gens_prime))
   }
@@ -592,8 +591,8 @@ where
       let (P_prime, r_P_prime, P_L, P_R, y_prime, x_vec_prime, a_vec_prime, gens_prime) =
         Self::bullet_reduce_prover(&P, &r_P, &x_vec, &a_vec, &y, &gens, &gens_y, transcript)?;
 
-      P_L_vec.push(P_L);
-      P_R_vec.push(P_R);
+      P_L_vec.push(P_L.compress());
+      P_R_vec.push(P_R.compress());
 
       P = P_prime;
       r_P = r_P_prime;
@@ -669,10 +668,13 @@ where
 
     // Step 1 in Hyrax's figure 7.
     for i in 0..self.P_L_vec.len() {
+      let P_L = self.P_L_vec[i].decompress().unwrap();
+      let P_R = self.P_R_vec[i].decompress().unwrap();
+
       let (P_prime, a_vec_prime, gens_prime) = Self::bullet_reduce_verifier(
         &P,
-        &self.P_L_vec[i],
-        &self.P_R_vec[i],
+        &P_L,
+        &P_R,
         &a_vec,
         &gens,
         transcript,
@@ -700,9 +702,9 @@ where
 
     let h = gens_y.get_blinding_gen();
 
-    let P_plus_beta = P * chal + self.beta;
+    let P_plus_beta = P * chal + self.beta.decompress().unwrap();
     let P_plus_beta_to_a = P_plus_beta * a_vec[0];
-    let left_hand_side = P_plus_beta_to_a + self.delta;
+    let left_hand_side = P_plus_beta_to_a + self.delta.decompress().unwrap();
 
     let g_hat_plus_g_to_a = g_hat + g * a_vec[0];
     let val_to_z1 = g_hat_plus_g_to_a * self.z_1;
