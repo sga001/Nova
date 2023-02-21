@@ -77,7 +77,7 @@ where
 
     // Commit to eval[0]
     let r_eval_0 = G::Scalar::random(&mut OsRng);
-    let comm_eval_0 = CE::<G>::commit(&gens.gen_s, &evals[0], &r_eval_0);
+    let comm_eval_0 = CE::<G>::commit(&gens.gens_s, &[evals[0].clone()], &r_eval_0);
 
     let mut U_folded = InnerProductInstance::new(
       &comms[0],
@@ -96,7 +96,7 @@ where
       let r_eval_i = G::Scalar::random(&mut OsRng);
       let r_polys_i = G::Scalar::random(&mut OsRng);
 
-      let comm_eval_i = CE::<G>::commit(&gens.gen_s, &evals[i], &r_eval_i);
+      let comm_eval_i = CE::<G>::commit(&gens.gens_s, &[evals[i].clone()], &r_eval_i);
 
       // perform the folding
       let (n, u, w) = NIFSForInnerProduct::prove(
@@ -209,7 +209,7 @@ impl<G: Group> InnerProductInstance<G> {
 
 struct InnerProductWitness<G: Group> {
   x_vec: Vec<G::Scalar>,
-  r_x: Vec<G::Scalar>,
+  r_x: G::Scalar,
   y: G::Scalar,
   r_y: G::Scalar,
 }
@@ -238,6 +238,7 @@ impl<G: Group> InnerProductWitness<G> {
 
 /// A non-interactive folding scheme (NIFS) for inner product relations
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct NIFSForInnerProduct<G: Group> {
   comm_cross_term: Commitment<G>, // commitment to cross term (which is a scalar)
 }
@@ -276,7 +277,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
 
     // commit to the cross-term
     let r_cross = G::Scalar::random(&mut OsRng);
-    let comm_cross = CE::<G>::commit(&gens.gen_s, &cross_term, &r_cross);
+    let comm_cross = CE::<G>::commit(&gens.gens_s, &[cross_term.clone()], &r_cross);
 
     // add the commitment of the cross-term to the transcript
     comm_cross.append_to_transcript(b"cross_term", transcript);
@@ -305,7 +306,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
 
     // generate commitment to y
     let r_y = G::Scalar::random(&mut OsRng);
-    let comm_y = CE::<G>::commit(&gens.gen_s, &y, &r_y);
+    let comm_y = CE::<G>::commit(&gens.gens_s, &[y.clone()], &r_y);
 
     let W = InnerProductWitness { x_vec, r_x, y, r_y };
 
@@ -705,7 +706,7 @@ where
 
     let g_hat_plus_g_to_a = g_hat + g * a_vec[0];
     let val_to_z1 = g_hat_plus_g_to_a * self.z_1;
-    let right_hand_side = val_to_z1 + h * self._z2;
+    let right_hand_side = val_to_z1 + h * self.z_2;
 
     if left_hand_side == right_hand_side {
       Ok(())
