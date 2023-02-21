@@ -602,11 +602,13 @@ where
       gens = gens_prime;
     }
 
+    assert_eq!(a_vec.len(), 1);
+
     // This is after the recursive calls to bullet_reduce in Hyrax
     let P_hat = P;
     let r_P_hat = r_P;
     let y_hat = y;
-    let a_hat = a_vec;
+    let a_hat = a_vec[0];
     let g_hat = gens;
 
     let d = G::Scalar::random(&mut OsRng);
@@ -692,23 +694,19 @@ where
 
     let chal = G::Scalar::challenge(b"chal_z", transcript);
 
-    let g_hat = gens.get_gens();
-    assert_eq!(g_hat.len(), 1);
-    let g_hat = g_hat[0];
-
-    let g = gens_y.get_gens();
-    assert_eq!(g.len(), 1);
-    let g = g[0];
-
     let h = gens_y.get_blinding_gen();
 
     let P_plus_beta = P * chal + self.beta.decompress().unwrap();
     let P_plus_beta_to_a = P_plus_beta * a_vec[0];
     let left_hand_side = P_plus_beta_to_a + self.delta.decompress().unwrap();
 
-    let g_hat_plus_g_to_a = g_hat + g * a_vec[0];
+    let g_hat = CE::<G>::commit(&gens, &[G::Scalar::one()], &G::Scalar::zero());
+    let g_to_a = CE::<G>::commit(&gens_y, &a_vec, &G::Scalar::zero()); // g^a
+    let h_to_z2 = CE::<G>::commit(&gens_y, &[G::Scalar::zero()], &self.z_2); // g^0 * h^z2 = h^z2
+                                                                        
+    let g_hat_plus_g_to_a = g_hat + g_to_a;
     let val_to_z1 = g_hat_plus_g_to_a * self.z_1;
-    let right_hand_side = val_to_z1 + h * self.z_2;
+    let right_hand_side = val_to_z1 + h_to_z2;
 
     if left_hand_side == right_hand_side {
       Ok(())
