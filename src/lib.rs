@@ -554,7 +554,6 @@ where
     res_r_secondary?;
     res_l_secondary?;
     
-
     Ok((self.zi_primary.clone(), self.zi_secondary.clone()))
   }
 }
@@ -1634,7 +1633,6 @@ mod tests {
       vec![<G1 as Group>::Scalar::one()],
       vec![<G2 as Group>::Scalar::zero()],
     );
-    println!("result is {:?}", res);
     assert!(res.is_ok());
 
     let (zn_primary, zn_secondary) = res.unwrap();
