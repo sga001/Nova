@@ -219,6 +219,7 @@ impl<G: Group> R1CSShape<G> {
       U.comm_W == comm_W && U.comm_E == comm_E
     };
 
+
     if res_eq && res_comm {
       Ok(())
     } else {
@@ -252,7 +253,8 @@ impl<G: Group> R1CSShape<G> {
     };
 
     // verify if comm_W is a commitment to W
-    let res_comm: bool = U.comm_W == CE::<G>::commit(&gens.gens, &W.W, &W.r_W);
+    let comm_W = CE::<G>::commit(&gens.gens, &W.W, &W.r_W);
+    let res_comm: bool = U.comm_W == comm_W;
 
     if res_eq && res_comm {
       Ok(())
@@ -530,7 +532,7 @@ impl<G: Group> RelaxedR1CSWitness<G> {
       W: witness.W.clone(),
       r_W: witness.r_W.clone(),
       E: vec![G::Scalar::zero(); S.num_cons],
-      r_E: G::Scalar::random(&mut OsRng),
+      r_E: G::Scalar::zero(),
     }
   }
 
