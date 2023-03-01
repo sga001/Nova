@@ -76,7 +76,7 @@ pub trait Group:
   fn preprocessed(&self) -> Self::PreprocessedGroupElement;
 
   /// Produce a vector of group elements using a static label
-  fn from_label(label: &'static [u8], n: usize) -> Vec<Self::PreprocessedGroupElement>;
+  fn from_label(label: &[u8], n: usize) -> Vec<Self::PreprocessedGroupElement>;
 
   /// Returns the affine coordinates (x, y, infinty) for the point
   fn to_coordinates(&self) -> (Self::Base, Self::Base, bool);

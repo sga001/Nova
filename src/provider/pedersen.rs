@@ -45,14 +45,15 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
   type CompressedCommitment = CompressedCommitment<G::CompressedGroupElement>;
 
   fn new(label: &'static [u8], n: usize) -> Self {
+    
     let mut blinding_label = label.to_vec();
     blinding_label.extend(b"blinding factor");
-
-    let h = G::from_label(&blinding_label, 1).first().unwrap();
+    let blinding = G::from_label(&blinding_label, 1);
+    let h = blinding.first().unwrap().clone();
 
     CommitmentGens {
       gens: G::from_label(label, n.next_power_of_two()),
-      h: *h,
+      h,
       _p: Default::default(),
     }
   }
@@ -321,7 +322,7 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
 
     CommitmentGens {
       gens: gens_scaled,
-      h: self.h,
+      h: self.h.clone(),
       _p: Default::default(),
     }
   }

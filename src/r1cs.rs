@@ -215,6 +215,7 @@ impl<G: Group> R1CSShape<G> {
         || CE::<G>::commit(&gens.gens, &W.W, &W.r_W),
         || CE::<G>::commit(&gens.gens, &W.E, &W.r_E),
       );
+
       U.comm_W == comm_W && U.comm_E == comm_E
     };
 
@@ -517,9 +518,9 @@ impl<G: Group> RelaxedR1CSWitness<G> {
   pub fn default(S: &R1CSShape<G>) -> RelaxedR1CSWitness<G> {
     RelaxedR1CSWitness {
       W: vec![G::Scalar::zero(); S.num_vars],
-      r_W: G::Scalar::random(&mut OsRng),
+      r_W: G::Scalar::zero(),
       E: vec![G::Scalar::zero(); S.num_cons],
-      r_E: G::Scalar::random(&mut OsRng),
+      r_E: G::Scalar::zero(),
     }
   }
 

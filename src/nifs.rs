@@ -56,7 +56,7 @@ impl<G: Group> NIFS<G> {
     U2.absorb_in_ro(&mut ro);
 
     // compute a commitment to the cross-term
-    let r_T = G::Scalar::random(&mut OsRng); //XXX: check whether we need to track r_T elsewhere
+    let r_T = G::Scalar::random(&mut OsRng); 
     let (T, comm_T) = S.commit_T(gens, U1, W1, U2, W2, &r_T)?;
 
     // append `comm_T` to the transcript and obtain a challenge
@@ -208,43 +208,43 @@ mod tests {
     W2: &R1CSWitness<G>,
   ) {
     // produce a default running instance
-    let mut r_W = RelaxedR1CSWitness::default(shape);
-    let mut r_U = RelaxedR1CSInstance::default(gens, shape);
+    let mut running_W = RelaxedR1CSWitness::default(shape);
+    let mut running_U = RelaxedR1CSInstance::default(gens, shape);
 
     // produce a step SNARK with (W1, U1) as the first incoming witness-instance pair
-    let res = NIFS::prove(gens, ro_consts, shape, &r_U, &r_W, U1, W1);
+    let res = NIFS::prove(gens, ro_consts, shape, &running_U, &running_W, U1, W1);
     assert!(res.is_ok());
     let (nifs, (_U, W)) = res.unwrap();
 
     // verify the step SNARK with U1 as the first incoming instance
-    let res = nifs.verify(ro_consts, shape, &r_U, U1);
+    let res = nifs.verify(ro_consts, shape, &running_U, U1);
     assert!(res.is_ok());
     let U = res.unwrap();
 
     assert_eq!(U, _U);
 
     // update the running witness and instance
-    r_W = W;
-    r_U = U;
+    running_W = W;
+    running_U = U;
 
     // produce a step SNARK with (W2, U2) as the second incoming witness-instance pair
-    let res = NIFS::prove(gens, ro_consts, shape, &r_U, &r_W, U2, W2);
+    let res = NIFS::prove(gens, ro_consts, shape, &running_U, &running_W, U2, W2);
     assert!(res.is_ok());
     let (nifs, (_U, W)) = res.unwrap();
 
     // verify the step SNARK with U1 as the first incoming instance
-    let res = nifs.verify(ro_consts, shape, &r_U, U2);
+    let res = nifs.verify(ro_consts, shape, &running_U, U2);
     assert!(res.is_ok());
     let U = res.unwrap();
 
     assert_eq!(U, _U);
 
     // update the running witness and instance
-    r_W = W;
-    r_U = U;
+    running_W = W;
+    running_U = U;
 
     // check if the running instance is satisfiable
-    assert!(shape.is_sat_relaxed(gens, &r_U, &r_W).is_ok());
+    assert!(shape.is_sat_relaxed(gens, &running_U, &running_W).is_ok());
   }
 
   #[test]

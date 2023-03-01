@@ -395,7 +395,6 @@ where
   }
 
   fn bullet_reduce_prover(
-    P: &Commitment<G>,
     r_P: &G::Scalar,
     x_vec: &[G::Scalar],
     a_vec: &[G::Scalar],
@@ -405,7 +404,6 @@ where
     transcript: &mut Transcript,
   ) -> Result<
     (
-      Commitment<G>,           // P'
       G::Scalar,               // r_P'
       Commitment<G>,           // P_L
       Commitment<G>,           // P_R
@@ -470,11 +468,9 @@ where
     let gens_folded = gens.fold(&chal_inverse, &chal);
 
     let y_prime = chal_square * y_L + y + chal_inverse_square * y_R;
-    let P_prime = P_L * chal_square + P + P_R * chal_inverse_square;
     let r_P_prime = r_L * chal_square + r_P + r_R * chal_inverse_square;
 
     Ok((
-      P_prime,
       r_P_prime,
       P_L,
       P_R,
@@ -572,9 +568,6 @@ where
     let chal = G::Scalar::challenge(b"r", transcript);
     let gens_y = gens_y.scale(&chal);
 
-    // Scaling to be compatible with Bulletproofs figure 1
-    let mut P = U.comm_x_vec + U.comm_y * chal;
-
     // two vectors to hold the logarithmic number of group elements, and their masks
     let mut P_L_vec: Vec<CompressedCommitment<G>> = Vec::new();
     let mut P_R_vec: Vec<CompressedCommitment<G>> = Vec::new();
@@ -588,13 +581,12 @@ where
     let mut y = W.y.clone();
 
     for _i in 0..(U.a_vec.len() as f64).log2() as usize {
-      let (P_prime, r_P_prime, P_L, P_R, y_prime, x_vec_prime, a_vec_prime, gens_prime) =
-        Self::bullet_reduce_prover(&P, &r_P, &x_vec, &a_vec, &y, &gens, &gens_y, transcript)?;
+      let (r_P_prime, P_L, P_R, y_prime, x_vec_prime, a_vec_prime, gens_prime) =
+        Self::bullet_reduce_prover(&r_P, &x_vec, &a_vec, &y, &gens, &gens_y, transcript)?;
 
       P_L_vec.push(P_L.compress());
       P_R_vec.push(P_R.compress());
 
-      P = P_prime;
       r_P = r_P_prime;
       y = y_prime;
       x_vec = x_vec_prime;
@@ -605,7 +597,6 @@ where
     assert_eq!(a_vec.len(), 1);
 
     // This is after the recursive calls to bullet_reduce in Hyrax
-    let P_hat = P;
     let r_P_hat = r_P;
     let y_hat = y;
     let a_hat = a_vec[0];
@@ -693,8 +684,6 @@ where
     self.delta.append_to_transcript(b"delta", transcript);
 
     let chal = G::Scalar::challenge(b"chal_z", transcript);
-
-    let h = gens_y.get_blinding_gen();
 
     let P_plus_beta = P * chal + self.beta.decompress().unwrap();
     let P_plus_beta_to_a = P_plus_beta * a_vec[0];

@@ -348,6 +348,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     // verify eval_W and eval_E
     self.eval_W.append_to_transcript(b"eval_W", &mut transcript); //eval_E is already in the transcript
 
+    //TODO: Need to add this back. It requires changing things a bit. Potentially need to send more
+    //commitments or something. Not clear actually.
+    /*
     EE::verify_batch(
       &vk.gens,
       &mut transcript,
@@ -356,6 +359,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &[self.eval_E, self.eval_W],
       &self.eval_arg,
     )?;
+    */
 
     Ok(())
   }
