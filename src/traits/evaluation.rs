@@ -40,7 +40,6 @@ pub trait EvaluationEngineTrait<G: Group>:
     transcript: &mut Transcript,
     comm: &[<Self::CE as CommitmentEngineTrait<G>>::Commitment],
     points: &[Vec<G::Scalar>],
-    comm_evals: &[<Self::CE as CommitmentEngineTrait<G>>::Commitment],
     arg: &Self::EvaluationArgument,
   ) -> Result<(), NovaError>;
 }

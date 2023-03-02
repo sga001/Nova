@@ -225,26 +225,36 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     eval_W.append_to_transcript(b"eval_W", &mut transcript);
 
     let eval_arg = EE::prove_batch(
-      &pk.gens,
+      &pk.gens,                  
       &mut transcript,
-      &[U.comm_E, U.comm_W],
+      &[U.comm_E, U.comm_W],      // commitment to x_vec in Hyrax
       &[W.E.clone(), W.W.clone()],
       &[r_x, r_y[1..].to_vec()],
-      &[eval_E, eval_W],
+      &[eval_E, eval_W],          // y_vec in Hyrax
     )?;
 
     Ok(RelaxedR1CSSNARK {
       sc_proof_outer,
       claims_outer: (claim_Az, claim_Bz, claim_Cz),
       sc_proof_inner,
-      eval_W,
       eval_E,
+      eval_W,
       eval_arg,
     })
   }
 
   /// verifies a proof of satisfiability of a RelaxedR1CS instance
   fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<G>) -> Result<(), NovaError> {
+
+    //TODO: From spartan's repo:
+    // 1. Commit to Az, Bz, Cz
+    // 2. Prove via knowledge proof the relation between those commitents
+    // 3. Add commitments to transcript and make sure that prover is not adding plaintext values to
+    //    transcript
+    // 4. Verify the knowledge proof in the verifier, which requires only commitments
+    //    This is instead of the outer_proof_expected stuff
+    // 5. Prove via equality proof the inner_sumcheck stuff.
+
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
 
     // append the R1CSShape and RelaxedR1CSInstance to the transcript
@@ -270,7 +280,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let (claim_Az, claim_Bz, claim_Cz) = self.claims_outer;
     let taus_bound_rx = EqPolynomial::new(tau).evaluate(&r_x);
     let claim_outer_final_expected =
-      taus_bound_rx * (claim_Az * claim_Bz - U.u * claim_Cz - self.eval_E);
+      taus_bound_rx * (claim_Az * claim_Bz - U.u * claim_Cz - self.eval_E); // TODO
     if claim_outer_final != claim_outer_final_expected {
       return Err(NovaError::InvalidSumcheckProof);
     }
@@ -293,6 +303,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let r_A = G::Scalar::challenge(b"challenge_rA", &mut transcript);
     let r_B = G::Scalar::challenge(b"challenge_rB", &mut transcript);
     let r_C = G::Scalar::challenge(b"challenge_rC", &mut transcript);
+
     let claim_inner_joint =
       r_A * self.claims_outer.0 + r_B * self.claims_outer.1 + r_C * self.claims_outer.2;
 
@@ -350,16 +361,15 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
 
     //TODO: Need to add this back. It requires changing things a bit. Potentially need to send more
     //commitments or something. Not clear actually.
-    /*
+    
     EE::verify_batch(
       &vk.gens,
       &mut transcript,
       &[U.comm_E, U.comm_W],
       &[r_x, r_y[1..].to_vec()],
-      &[self.eval_E, self.eval_W],
       &self.eval_arg,
     )?;
-    */
+    
 
     Ok(())
   }

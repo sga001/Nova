@@ -33,6 +33,7 @@ pub struct EvaluationGens<G: Group> {
 pub struct EvaluationArgument<G: Group> {
   nifs: Vec<NIFSForInnerProduct<G>>,
   ipa: InnerProductArgument<G>,
+  eval_commitments: Vec<Commitment<G>>,
 }
 
 /// Provides an implementation of a polynomial evaluation engine using IPA
@@ -60,43 +61,47 @@ where
   fn prove_batch(
     gens: &Self::EvaluationGens,
     transcript: &mut Transcript,
-    comms: &[Commitment<G>],
+    comms_x_vec: &[Commitment<G>], // commitments to the x_vector in Hyrax
     polys: &[Vec<G::Scalar>],
     points: &[Vec<G::Scalar>],
-    evals: &[G::Scalar],
+    y_vec: &[G::Scalar],
   ) -> Result<Self::EvaluationArgument, NovaError> {
     // sanity checks (these should never fail)
     assert!(polys.len() >= 2);
-    assert_eq!(comms.len(), polys.len());
-    assert_eq!(comms.len(), points.len());
-    assert_eq!(comms.len(), evals.len());
+    assert_eq!(comms_x_vec.len(), polys.len());
+    assert_eq!(comms_x_vec.len(), points.len());
+    assert_eq!(comms_x_vec.len(), y_vec.len());
 
-    // Need to commit to evals (which are basically "c").
-    // Then pass evals and blinding factors to InnerProductWitness
+    // Need to commit to y_vector 
+    // Then pass y_vector and blinding factors to InnerProductWitness
     // and pass commitments to InnerProductInstance
 
-    // Commit to eval[0]
-    let r_eval_0 = G::Scalar::random(&mut OsRng);
-    let comm_eval_0 = CE::<G>::commit(&gens.gens_s, &[evals[0].clone()], &r_eval_0);
+    let mut comms_y_vec = Vec::new();
+
+    // Commit to y_vec[0]
+    let r_y_vec_0 = G::Scalar::random(&mut OsRng);
+    let comm_y_vec_0 = CE::<G>::commit(&gens.gens_s, &[y_vec[0].clone()], &r_y_vec_0);
 
     let mut U_folded = InnerProductInstance::new(
-      &comms[0],
+      &comms_x_vec[0],
       &EqPolynomial::new(points[0].clone()).evals(),
-      &comm_eval_0,
+      &comm_y_vec_0,
     );
+
+    comms_y_vec.push(comm_y_vec_0);
 
     // Record value of eval and randomness used in commitment in the witness
 
     let r_polys_0 = G::Scalar::random(&mut OsRng);
-    let mut W_folded = InnerProductWitness::new(&polys[0], &r_polys_0, &evals[0], &r_eval_0);
+    let mut W_folded = InnerProductWitness::new(&polys[0], &r_polys_0, &y_vec[0], &r_y_vec_0);
     let mut nifs = Vec::new();
 
     for i in 1..polys.len() {
-      // Commit to eval[i]
-      let r_eval_i = G::Scalar::random(&mut OsRng);
+      // Commit to y_vec[i]
+      let r_y_vec_i = G::Scalar::random(&mut OsRng);
       let r_polys_i = G::Scalar::random(&mut OsRng);
 
-      let comm_eval_i = CE::<G>::commit(&gens.gens_s, &[evals[i].clone()], &r_eval_i);
+      let comm_y_vec_i = CE::<G>::commit(&gens.gens_s, &[y_vec[i].clone()], &r_y_vec_i);
 
       // perform the folding
       let (n, u, w) = NIFSForInnerProduct::prove(
@@ -104,14 +109,17 @@ where
         &U_folded,
         &W_folded,
         &InnerProductInstance::new(
-          &comms[i],
+          &comms_x_vec[i],
           &EqPolynomial::new(points[i].clone()).evals(),
-          &comm_eval_i,
+          &comm_y_vec_i,
         ),
-        &InnerProductWitness::new(&polys[i], &r_polys_i, &evals[i], &r_eval_i),
+        &InnerProductWitness::new(&polys[i], &r_polys_i, &y_vec[i], &r_y_vec_i),
         transcript,
       );
+
       nifs.push(n);
+      comms_y_vec.push(comm_y_vec_i);
+
       U_folded = u;
       W_folded = w;
     }
@@ -119,36 +127,38 @@ where
     let ipa =
       InnerProductArgument::prove(&gens.gens_v, &gens.gens_s, &U_folded, &W_folded, transcript)?;
 
-    Ok(EvaluationArgument { nifs, ipa })
+    Ok(EvaluationArgument { nifs, ipa, eval_commitments: comms_y_vec })
   }
 
   /// A method to verify purported evaluations of a batch of polynomials
   fn verify_batch(
     gens: &Self::EvaluationGens,
     transcript: &mut Transcript,
-    comms: &[Commitment<G>],
+    comms_x_vec: &[Commitment<G>],      
     points: &[Vec<G::Scalar>],
-    comm_evals: &[Commitment<G>],
     arg: &Self::EvaluationArgument,
   ) -> Result<(), NovaError> {
+
+    let comms_y_vec = &arg.eval_commitments;
+
     // sanity checks (these should never fail)
-    assert!(comms.len() >= 2);
-    assert_eq!(comms.len(), points.len());
-    assert_eq!(comms.len(), comm_evals.len());
+    assert!(comms_x_vec.len() >= 2);
+    assert_eq!(comms_x_vec.len(), points.len());
+    assert_eq!(comms_x_vec.len(), comms_y_vec.len());
 
     let mut U_folded = InnerProductInstance::new(
-      &comms[0],
+      &comms_x_vec[0],
       &EqPolynomial::new(points[0].clone()).evals(),
-      &comm_evals[0],
+      &comms_y_vec[0],
     );
     let mut num_vars = points[0].len();
-    for i in 1..comms.len() {
+    for i in 1..comms_x_vec.len() {
       let u = arg.nifs[i - 1].verify(
         &U_folded,
         &InnerProductInstance::new(
-          &comms[i],
+          &comms_x_vec[i],
           &EqPolynomial::new(points[i].clone()).evals(),
-          &comm_evals[i],
+          &comms_y_vec[i],
         ),
         transcript,
       );
@@ -448,6 +458,9 @@ where
     P_R.append_to_transcript(b"R", transcript);
 
     let chal = G::Scalar::challenge(b"challenge_r", transcript);
+
+//    println!("Challenge in bullet_reduce_prover {:?}", chal);
+
     let chal_square = chal * chal;
     let chal_inverse = chal.invert().unwrap();
     let chal_inverse_square = chal_inverse * chal_inverse;
@@ -503,6 +516,10 @@ where
     P_R.append_to_transcript(b"R", transcript);
 
     let chal = G::Scalar::challenge(b"challenge_r", transcript);
+
+
+//    println!("Challenge in bullet_reduce_verifier {:?}", chal);
+
     let chal_square = chal * chal;
     let chal_inverse = chal.invert().unwrap();
     let chal_inverse_square = chal_inverse * chal_inverse;
@@ -564,8 +581,14 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
+    println!("PROVE: comm_x_vec {:?}", U.comm_x_vec);
+    println!("PROVE: comm_y {:?}", U.comm_y);
+
     // sample a random challenge for commiting to the inner product
     let chal = G::Scalar::challenge(b"r", transcript);
+
+    println!("challenge in IPA prove {:?}", chal);
+
     let gens_y = gens_y.scale(&chal);
 
     // two vectors to hold the logarithmic number of group elements, and their masks
@@ -650,8 +673,14 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
+    println!("VERIFY: comm_x_vec {:?}", U.comm_x_vec);
+    println!("VERIFY: comm_y {:?}", U.comm_y);
+
     // sample a random challenge for scaling commitment
     let chal = G::Scalar::challenge(b"r", transcript);
+
+    println!("challenge in IPA verify {:?}", chal);
+
     let gens_y = gens_y.scale(&chal);
 
     // Scaling to be compatible with Bulletproofs figure 1
