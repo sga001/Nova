@@ -631,6 +631,8 @@ where
     let (nifs_primary, (f_U_primary, f_W_primary)) = res_primary?;
     let (nifs_secondary, (f_U_secondary, f_W_secondary)) = res_secondary?;
 
+    println!("PROVE primary.comm_E {:?}", f_U_primary.comm_E);
+
     // produce a prover key for the SNARK
     let (pk_primary, pk_secondary) = rayon::join(
       || S1::prover_key(&pp.r1cs_gens_primary, &pp.r1cs_shape_padded_primary),
@@ -749,6 +751,7 @@ where
       return Err(NovaError::ProofVerifyError);
     }
 
+    
     // fold the running instance and last instance to get a folded instance
     let f_U_primary = self.nifs_primary.verify(
       &pp.ro_consts_primary,
@@ -762,6 +765,8 @@ where
       &self.r_U_secondary,
       &self.l_u_secondary,
     )?;
+
+    println!("VERIFY primary.comm_E {:?}", f_U_primary.comm_E);
 
     // produce a verifier key for the SNARK
     let (vk_primary, vk_secondary) = rayon::join(

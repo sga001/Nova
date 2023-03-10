@@ -90,6 +90,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     assert_eq!(pk.S.num_io.next_power_of_two(), pk.S.num_io);
     assert!(pk.S.num_io < pk.S.num_vars);
 
+
     // append the R1CSShape and RelaxedR1CSInstance to the transcript
     pk.S.append_to_transcript(b"S", &mut transcript);
     U.append_to_transcript(b"U", &mut transcript);
@@ -254,6 +255,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     // 4. Verify the knowledge proof in the verifier, which requires only commitments
     //    This is instead of the outer_proof_expected stuff
     // 5. Prove via equality proof the inner_sumcheck stuff.
+
 
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
 

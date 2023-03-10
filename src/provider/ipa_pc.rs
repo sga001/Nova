@@ -72,9 +72,6 @@ where
     assert_eq!(comms_x_vec.len(), points.len());
     assert_eq!(comms_x_vec.len(), y_vec.len());
 
-    // Need to commit to y_vector 
-    // Then pass y_vector and blinding factors to InnerProductWitness
-    // and pass commitments to InnerProductInstance
 
     let mut comms_y_vec = Vec::new();
 
@@ -581,13 +578,13 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
-    println!("PROVE: comm_x_vec {:?}", U.comm_x_vec);
-    println!("PROVE: comm_y {:?}", U.comm_y);
+    //println!("PROVE: comm_x_vec {:?}", U.comm_x_vec);
+    //println!("PROVE: comm_y {:?}", U.comm_y);
 
     // sample a random challenge for commiting to the inner product
     let chal = G::Scalar::challenge(b"r", transcript);
 
-    println!("challenge in IPA prove {:?}", chal);
+    //println!("challenge in IPA prove {:?}", chal);
 
     let gens_y = gens_y.scale(&chal);
 
@@ -673,13 +670,13 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
-    println!("VERIFY: comm_x_vec {:?}", U.comm_x_vec);
-    println!("VERIFY: comm_y {:?}", U.comm_y);
+    //println!("VERIFY: comm_x_vec {:?}", U.comm_x_vec);
+    //println!("VERIFY: comm_y {:?}", U.comm_y);
 
     // sample a random challenge for scaling commitment
     let chal = G::Scalar::challenge(b"r", transcript);
 
-    println!("challenge in IPA verify {:?}", chal);
+    //println!("challenge in IPA verify {:?}", chal);
 
     let gens_y = gens_y.scale(&chal);
 
