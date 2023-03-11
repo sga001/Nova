@@ -452,8 +452,6 @@ where
 
     let chal = G::Scalar::challenge(b"challenge_r", transcript);
 
-//    println!("Challenge in bullet_reduce_prover {:?}", chal);
-
     let chal_square = chal * chal;
     let chal_inverse = chal.invert().unwrap();
     let chal_inverse_square = chal_inverse * chal_inverse;
@@ -574,12 +572,8 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
-    //println!("PROVE: comm_x_vec {:?}", U.comm_x_vec.to_coordinates());
-    //println!("PROVE: comm_y {:?}", U.comm_y.to_coordinates());
-
-    // sample a random challenge for commiting to the inner product
+    // Scale generator to be consistent with Bulletproofs Figure 1.
     let chal = G::Scalar::challenge(b"r", transcript);
-
     let gens_y = gens_y.scale(&chal);
 
     // two vectors to hold the logarithmic number of group elements, and their masks
@@ -621,16 +615,16 @@ where
     let r_beta = G::Scalar::random(&mut OsRng);
 
     let delta = CE::<G>::commit(&g_hat, &[d.clone()], &r_delta).compress();
-
     let beta = CE::<G>::commit(&gens_y, &[d], &r_beta).compress();
 
     beta.append_to_transcript(b"beta", transcript);
     delta.append_to_transcript(b"delta", transcript);
 
     let chal = G::Scalar::challenge(b"chal_z", transcript);
-
+    
     let z_1 = d + chal * y_hat;
-    let z_2 = a_hat * (chal * r_P_hat + r_beta) + r_delta;
+    let z_2 = a_hat * ((chal * r_P_hat) + r_beta) + r_delta;
+
 
     Ok(InnerProductArgument {
       P_L_vec,
@@ -664,12 +658,10 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
-    // sample a random challenge for scaling commitment
-    let chal = G::Scalar::challenge(b"r", transcript);
-
-    let gens_y = gens_y.scale(&chal);
 
     // Scaling to be compatible with Bulletproofs figure 1
+    let chal = G::Scalar::challenge(b"r", transcript); // sample a random challenge for scaling commitment
+    let gens_y = gens_y.scale(&chal);
     let mut P = U.comm_x_vec + U.comm_y * chal;
     let mut gens = gens.clone();
     let mut a_vec = U.a_vec.clone();
@@ -694,7 +686,6 @@ where
     }
 
     // Step 3 in Hyrax's Figure 7
-
     self.beta.append_to_transcript(b"beta", transcript);
     self.delta.append_to_transcript(b"delta", transcript);
 
@@ -705,16 +696,20 @@ where
     let left_hand_side = P_plus_beta_to_a + self.delta.decompress().unwrap();
 
     let g_hat = CE::<G>::commit(&gens, &[G::Scalar::one()], &G::Scalar::zero());
-    let g_to_a = CE::<G>::commit(&gens_y, &a_vec, &G::Scalar::zero()); // g^a
+    let g_to_a = CE::<G>::commit(&gens_y, &a_vec, &G::Scalar::zero()); // g^a*h^0 = g^a
     let h_to_z2 = CE::<G>::commit(&gens_y, &[G::Scalar::zero()], &self.z_2); // g^0 * h^z2 = h^z2
                                                                         
     let g_hat_plus_g_to_a = g_hat + g_to_a;
     let val_to_z1 = g_hat_plus_g_to_a * self.z_1;
     let right_hand_side = val_to_z1 + h_to_z2;
 
+    println!("LEFT {:?}", left_hand_side.to_coordinates());
+    println!("RIGHT {:?}", right_hand_side.to_coordinates());
+
     if left_hand_side == right_hand_side {
       Ok(())
     } else {
+      println!("Invalid IPA! whoops");
       Err(NovaError::InvalidIPA)
     }
   }
