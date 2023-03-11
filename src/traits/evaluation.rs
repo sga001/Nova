@@ -30,6 +30,7 @@ pub trait EvaluationEngineTrait<G: Group>:
     transcript: &mut Transcript,
     comm: &[<Self::CE as CommitmentEngineTrait<G>>::Commitment],
     polys: &[Vec<G::Scalar>],
+    randomness: &[G::Scalar],
     points: &[Vec<G::Scalar>],
     evals: &[G::Scalar],
   ) -> Result<Self::EvaluationArgument, NovaError>;

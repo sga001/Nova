@@ -62,7 +62,8 @@ where
     gens: &Self::EvaluationGens,
     transcript: &mut Transcript,
     comms_x_vec: &[Commitment<G>], // commitments to the x_vector in Hyrax
-    polys: &[Vec<G::Scalar>],
+    polys: &[Vec<G::Scalar>],      // x_vector in Hyrax
+    rand_polys: &[G::Scalar],      // decommitment of x_vector
     points: &[Vec<G::Scalar>],
     y_vec: &[G::Scalar],
   ) -> Result<Self::EvaluationArgument, NovaError> {
@@ -71,7 +72,6 @@ where
     assert_eq!(comms_x_vec.len(), polys.len());
     assert_eq!(comms_x_vec.len(), points.len());
     assert_eq!(comms_x_vec.len(), y_vec.len());
-
 
     let mut comms_y_vec = Vec::new();
 
@@ -88,16 +88,12 @@ where
     comms_y_vec.push(comm_y_vec_0);
 
     // Record value of eval and randomness used in commitment in the witness
-
-    let r_polys_0 = G::Scalar::random(&mut OsRng);
-    let mut W_folded = InnerProductWitness::new(&polys[0], &r_polys_0, &y_vec[0], &r_y_vec_0);
+    let mut W_folded = InnerProductWitness::new(&polys[0], &rand_polys[0], &y_vec[0], &r_y_vec_0);
     let mut nifs = Vec::new();
 
     for i in 1..polys.len() {
       // Commit to y_vec[i]
       let r_y_vec_i = G::Scalar::random(&mut OsRng);
-      let r_polys_i = G::Scalar::random(&mut OsRng);
-
       let comm_y_vec_i = CE::<G>::commit(&gens.gens_s, &[y_vec[i].clone()], &r_y_vec_i);
 
       // perform the folding
@@ -110,7 +106,7 @@ where
           &EqPolynomial::new(points[i].clone()).evals(),
           &comm_y_vec_i,
         ),
-        &InnerProductWitness::new(&polys[i], &r_polys_i, &y_vec[i], &r_y_vec_i),
+        &InnerProductWitness::new(&polys[i], &rand_polys[i], &y_vec[i], &r_y_vec_i),
         transcript,
       );
 
@@ -303,7 +299,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
       .a_vec
       .par_iter()
       .zip(U2.a_vec.par_iter())
-      .map(|(x1, x2)| *x1 + r * x2)
+      .map(|(a1, a2)| *a1 + r * a2)
       .collect::<Vec<G::Scalar>>();
 
     // fold using the cross term and fold x_vec as well
@@ -312,7 +308,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
     let r_x = W1.r_x + W2.r_x * r;
 
     // generate commitment to y
-    let r_y = G::Scalar::random(&mut OsRng);
+    let r_y = W1.r_y + W2.r_y * r * r + r_cross * r;
     let comm_y = CE::<G>::commit(&gens.gens_s, &[y.clone()], &r_y);
 
     let W = InnerProductWitness { x_vec, r_x, y, r_y };
@@ -543,8 +539,6 @@ where
     W: &InnerProductWitness<G>,
     transcript: &mut Transcript,
   ) -> Result<Self, NovaError> {
-    transcript.append_message(b"protocol-name", Self::protocol_name());
-
     // The goal here is to prove that x_vec * a_vec = y.
     // We have a hiding vector commitment to x_vec, and a hiding commitment to y.
     // a_vec is a vector in the clear.
@@ -569,6 +563,8 @@ where
     //
     // gens                     vec<g_i>
     // gens_y                   g
+    
+    transcript.append_message(b"protocol-name", Self::protocol_name());
 
     if U.a_vec.len() != W.x_vec.len() {
       return Err(NovaError::InvalidInputLength);
@@ -578,13 +574,11 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
-    //println!("PROVE: comm_x_vec {:?}", U.comm_x_vec);
-    //println!("PROVE: comm_y {:?}", U.comm_y);
+    //println!("PROVE: comm_x_vec {:?}", U.comm_x_vec.to_coordinates());
+    //println!("PROVE: comm_y {:?}", U.comm_y.to_coordinates());
 
     // sample a random challenge for commiting to the inner product
     let chal = G::Scalar::challenge(b"r", transcript);
-
-    //println!("challenge in IPA prove {:?}", chal);
 
     let gens_y = gens_y.scale(&chal);
 
@@ -670,13 +664,8 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
-    //println!("VERIFY: comm_x_vec {:?}", U.comm_x_vec);
-    //println!("VERIFY: comm_y {:?}", U.comm_y);
-
     // sample a random challenge for scaling commitment
     let chal = G::Scalar::challenge(b"r", transcript);
-
-    //println!("challenge in IPA verify {:?}", chal);
 
     let gens_y = gens_y.scale(&chal);
 

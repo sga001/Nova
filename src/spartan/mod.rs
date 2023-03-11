@@ -84,6 +84,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
   ) -> Result<Self, NovaError> {
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
 
+
     // sanity check that R1CSShape has certain size characteristics
     assert_eq!(pk.S.num_cons.next_power_of_two(), pk.S.num_cons);
     assert_eq!(pk.S.num_vars.next_power_of_two(), pk.S.num_vars);
@@ -153,6 +154,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let r_A = G::Scalar::challenge(b"challenge_rA", &mut transcript);
     let r_B = G::Scalar::challenge(b"challenge_rB", &mut transcript);
     let r_C = G::Scalar::challenge(b"challenge_rC", &mut transcript);
+
     let claim_inner_joint = r_A * claim_Az + r_B * claim_Bz + r_C * claim_Cz;
 
     let poly_ABC = {
@@ -228,10 +230,11 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let eval_arg = EE::prove_batch(
       &pk.gens,                  
       &mut transcript,
-      &[U.comm_E, U.comm_W],      // commitment to x_vec in Hyrax
-      &[W.E.clone(), W.W.clone()],
+      &[U.comm_E, U.comm_W],             // commitment to x_vec in Hyrax
+      &[W.E.clone(), W.W.clone()],       // x_vec in Hyrax
+      &[W.r_E.clone(), W.r_W.clone()],   // decommitment to x_vec
       &[r_x, r_y[1..].to_vec()],
-      &[eval_E, eval_W],          // y_vec in Hyrax
+      &[eval_E, eval_W],                 // y_vec in Hyrax
     )?;
 
     Ok(RelaxedR1CSSNARK {
@@ -255,7 +258,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     // 4. Verify the knowledge proof in the verifier, which requires only commitments
     //    This is instead of the outer_proof_expected stuff
     // 5. Prove via equality proof the inner_sumcheck stuff.
-
 
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
 

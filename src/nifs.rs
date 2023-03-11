@@ -71,6 +71,8 @@ impl<G: Group> NIFS<G> {
     // fold the witness using `r` and `T`
     let W = W1.fold(W2, &T, &r_T, &r)?;
 
+
+
     // return the folded instance and witness
     Ok((
       Self {
