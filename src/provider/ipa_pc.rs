@@ -54,7 +54,7 @@ where
   fn setup(gens: &<Self::CE as CommitmentEngineTrait<G>>::CommitmentGens) -> Self::EvaluationGens {
     EvaluationGens {
       gens_v: gens.clone(),
-      gens_s: CommitmentGens::<G>::new(b"ipa", 1),
+      gens_s: CommitmentGens::<G>::new_with_blinding_gen(b"ipa", 1, &gens.get_blinding_gen()),
     }
   }
 
@@ -572,7 +572,11 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
-    // Scale generator to be consistent with Bulletproofs Figure 1.
+    println!("PROVER: Value of h in g {:?}", gens_y.get_blinding_gen());
+    println!("PROVER: Value of h in gens {:?}", gens.get_blinding_gen());
+
+    // Scale generator to be consistent with Bulletproofs Figure 1 (in the Bulletproofs 
+    // figure, gens_y is "u" and chal is "x").
     let chal = G::Scalar::challenge(b"r", transcript);
     let gens_y = gens_y.scale(&chal);
 
@@ -580,6 +584,8 @@ where
     let mut P_L_vec: Vec<CompressedCommitment<G>> = Vec::new();
     let mut P_R_vec: Vec<CompressedCommitment<G>> = Vec::new();
 
+    // Step 1 in Hyrax's Figure 7. The prover doesn't need P explicitly, so we don't
+    // need to compute it. We just compute the randomness used in the commitment.
     let mut r_P = W.r_x + W.r_y;
 
     // we create mutable copies of vectors and generators
@@ -658,13 +664,18 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
-
     // Scaling to be compatible with Bulletproofs figure 1
     let chal = G::Scalar::challenge(b"r", transcript); // sample a random challenge for scaling commitment
     let gens_y = gens_y.scale(&chal);
     let mut P = U.comm_x_vec + U.comm_y * chal;
     let mut gens = gens.clone();
     let mut a_vec = U.a_vec.clone();
+
+
+    println!("Verifier: Value of h in g {:?}", gens_y.get_blinding_gen());
+    println!("Verifier: Value of h in gens {:?}", gens.get_blinding_gen());
+
+
 
     // Step 1 in Hyrax's figure 7.
     for i in 0..self.P_L_vec.len() {

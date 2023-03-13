@@ -21,8 +21,11 @@ pub trait CommitmentGensTrait<G: Group>:
   /// Holds the type of the compressed commitment
   type CompressedCommitment;
 
-  /// Samples a new commitment key of a specified size
+  /// Samples a new commitment generator of a specified size
   fn new(label: &'static [u8], n: usize) -> Self;
+
+  /// Samples a new commitment generator but reuses an existing blinding generator
+  fn new_with_blinding_gen(label: &'static [u8], n: usize, h: &G::PreprocessedGroupElement) -> Self;
 
   /// Returns the vector length that can be committed
   fn len(&self) -> usize;
