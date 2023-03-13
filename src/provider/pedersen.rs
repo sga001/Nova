@@ -328,11 +328,9 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
       .map(|g| G::vartime_multiscalar_mul(&[*r], &[g]).preprocessed())
       .collect();
 
-    //let h_scaled = G::vartime_multiscalar_mul(&[*r], &[self.h.clone()]).preprocessed();
-
     CommitmentGens {
       gens: gens_scaled,
-      h: self.h.clone(), //h_scaled,
+      h: self.h.clone(),
       _p: Default::default(),
     }
   }
