@@ -583,7 +583,7 @@ where
 
     // Step 1 in Hyrax's Figure 7. The prover doesn't need P explicitly, so we don't
     // need to compute it. We just compute the randomness used in the commitment.
-    let mut r_P = W.r_x + W.r_y;
+    let mut r_P = W.r_x + W.r_y * chal;
 
     // we create mutable copies of vectors and generators
     let mut x_vec = W.x_vec.to_vec();
