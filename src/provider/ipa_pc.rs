@@ -706,9 +706,6 @@ where
     let val_to_z1 = g_hat_plus_g_to_a * self.z_1;
     let right_hand_side = val_to_z1 + h_to_z2;
 
-    println!("LEFT {:?}", left_hand_side.to_coordinates());
-    println!("RIGHT {:?}", right_hand_side.to_coordinates());
-
     if left_hand_side == right_hand_side {
       Ok(())
     } else {
