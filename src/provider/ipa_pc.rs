@@ -572,9 +572,6 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
-    println!("PROVER: Value of h in g {:?}", gens_y.get_blinding_gen());
-    println!("PROVER: Value of h in gens {:?}", gens.get_blinding_gen());
-
     // Scale generator to be consistent with Bulletproofs Figure 1 (in the Bulletproofs 
     // figure, gens_y is "u" and chal is "x").
     let chal = G::Scalar::challenge(b"r", transcript);
@@ -668,14 +665,9 @@ where
     let chal = G::Scalar::challenge(b"r", transcript); // sample a random challenge for scaling commitment
     let gens_y = gens_y.scale(&chal);
     let mut P = U.comm_x_vec + U.comm_y * chal;
+
     let mut gens = gens.clone();
     let mut a_vec = U.a_vec.clone();
-
-
-    println!("Verifier: Value of h in g {:?}", gens_y.get_blinding_gen());
-    println!("Verifier: Value of h in gens {:?}", gens.get_blinding_gen());
-
-
 
     // Step 1 in Hyrax's figure 7.
     for i in 0..self.P_L_vec.len() {
