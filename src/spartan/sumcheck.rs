@@ -2,7 +2,7 @@
 #![allow(clippy::type_complexity)]
 use super::polynomial::MultilinearPolynomial;
 use crate::errors::NovaError;
-use crate::traits::{AppendToTranscriptTrait, ChallengeTrait, Group};
+use crate::traits::{AppendToTranscriptTrait, ChallengeTrait, Group, evaluation::EvaluationEngineTrait};
 use core::marker::PhantomData;
 use ff::Field;
 use merlin::Transcript;
@@ -217,6 +217,97 @@ impl<G: Group> SumcheckProof<G> {
       vec![poly_A[0], poly_B[0], poly_C[0], poly_D[0]],
     )
   }
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) struct ZKSumcheckProof<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
+  comm_polys: Vec<G::Commitment>,
+  comm_evals: Vec<G::Commitment>,
+//  proofs: Vec<DotProductProof>, //TODO: yikes
+}
+
+
+impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> SumcheckProof<G, EE> {
+  pub fn new(
+    comm_polys: Vec<G::Commitment>,
+    comm_evals: Vec<G::Commitment>,
+    //proofs: Vec<DotProductProof>, //TODO
+  ) -> Self {
+    SumCheckProof {
+      comm_polys,
+      comm_evals,
+      //proofs,
+    }
+  }
+
+
+  pub fn verify(
+    &self,
+    comm_claim: &G::Commitment,
+    num_rounds: usize,
+    degree_bound: usize,
+    gens_1: &EE::EvaluationGens, // generator of size 1
+    gens_n: &EE::EvaluationGens, // generators of size n
+    transcript: &mut Transcript,
+  )-> Result<(G::Commitment, Vec<G::Scalar>), NovaError> {
+    // verify degree bound
+    if gens_n.gens.len() != degree_bound + 1 {
+      return Err(NovaError::InvalidSumcheckProof);
+    }
+
+    // verify that there is a univariate polynomial for each round
+    if self.comm_polys.len() != num_rounds || self.comm_evals.len() != num_rounds {
+      return Err(NovaError::InvalidSumcheckProof);
+    }
+
+    let mut r = Vec::new();
+    
+    for i in 0..self.comm_polys.len() {
+      let comm_poly = &self.comm_polys[i];
+      
+      // append the prover's polynomial to the transcript
+      comm_poly.append_to_transcript(b"comm_poly", transcript);
+
+      }
+
+      // append the prover's message to the transcript
+      poly.append_to_transcript(b"poly", transcript);
+
+      //derive the verifier's challenge for the next round
+      let r_i = G::Scalar::challenge(b"challenge_nextround", transcript);
+
+      // verify the proof of sum-check and evals
+
+      let res = {
+        let comm_claim_per_round = if i == 0 {
+          comm_claim
+        } else {
+          &self.comm_evals[i-1]
+        };
+
+        let comm_eval = &self.comm_evals[i];
+
+        // add two claims to transcript
+
+        comm_claim_per_round.append_to_transcript(b"comm_claim_per_round", transcript);
+        comm_eval.append_to_transcript(b"comm_eval", transcript);
+
+        // produce two weights
+        let w1 = G::Scalar::challenge(b"combine_two_claims_to_one_w1", transcript);
+        let w2 = G::Scalar::challenge(b"combine_two_claims_to_one_w2", transcript);
+
+        // compute a weighted sum of the RHS
+        let comm_target = G::vartime_multiscalar_mul(&[w1, w2], &comm_claim_per_round).compress();
+
+        //TODO: Not sure if above is right. This is line 127 in Spartan's sumcheck
+
+
+
+      };
+
+
+    }
 }
 
 // ax^2 + bx + c stored as vec![a,b,c]
