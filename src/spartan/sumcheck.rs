@@ -294,20 +294,53 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> SumcheckProof<G, EE> {
         comm_eval.append_to_transcript(b"comm_eval", transcript);
 
         // produce two weights
+        let w0 = G::Scalar::challenge(b"combine_two_claims_to_one_w0", transcript);
         let w1 = G::Scalar::challenge(b"combine_two_claims_to_one_w1", transcript);
-        let w2 = G::Scalar::challenge(b"combine_two_claims_to_one_w2", transcript);
 
         // compute a weighted sum of the RHS
         let comm_target = G::vartime_multiscalar_mul(&[w1, w2], &comm_claim_per_round).compress();
-
         //TODO: Not sure if above is right. This is line 127 in Spartan's sumcheck
 
+        let a = {
+          // the vector to use for decommit for sum-check test
+          let a_sc = {
+            let mut a = vec![G::Scalar::one(); degree_bound + 1];
+            a[0] += G::Scalar::one();
+            a
+          };
 
+          // the vector to use to decommit for evaluation
+          let a_eval = {
+            let mut a = vec![G::Scalar::one(); degree_bound + 1];
+            for j in 1..a.len() {
+              a[j] = a[j-1] * r_i;
+            }
+            a
+          };
 
+          // take weighted sum of the two vectors using w
+          assert_eq!(a_sc.len(), a_eval.len());
+          (0..a_sc.len()).map(|i| w_0 * a_sc[i] + w_1 * a_eval[i]).collect::<Vec<G::Scalar>>()
+        };
+
+        /* TODO
+         * self.proofs[i].verify(gens_1, gens_n, transcript, &a, &self.comm_polys[i],
+         * &comm_target).is_ok()
+         * 
+         */
+         true
       };
 
+      if !res {
+        return Err(NovaError::InvalidSumcheckProof);
+      }
 
+      r.push(r_i);
     }
+
+    Ok((self.comm_evals[self.comm_evals.len()-1],  r))
+  }
+
 }
 
 // ax^2 + bx + c stored as vec![a,b,c]
