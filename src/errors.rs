@@ -35,6 +35,9 @@ pub enum NovaError {
   /// returned when an invalid inner product argument is provided
   #[error("InvalidIPA")]
   InvalidIPA,
+  /// returned when an invalid dot product proof (schnorr) is provided
+  #[error("InvalidDotProductProof")]
+  InvalidDotProductProof,
   /// returned when an invalid sum-check proof is provided
   #[error("InvalidSumcheckProof")]
   InvalidSumcheckProof,

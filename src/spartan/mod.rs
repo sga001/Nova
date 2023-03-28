@@ -2,6 +2,7 @@
 //! over the polynomial commitment and evaluation argument (i.e., a PCS)
 pub mod polynomial;
 mod sumcheck;
+mod nizk;
 
 use crate::{
   errors::NovaError,
