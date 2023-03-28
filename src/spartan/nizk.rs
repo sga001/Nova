@@ -24,13 +24,13 @@ pub struct DotProductProof<G: Group> {
 
 impl<G: Group> DotProductProof<G> {
 
-  fn protocol_name() -> &'static [u8] {
+  pub fn protocol_name() -> &'static [u8] {
     b"dot product proof"
   }
 
   pub fn compute_dotproduct(a: &[G::Scalar], b: &[G::Scalar]) -> G::Scalar {
     assert_eq!(a.len(), b.len());
-    let result = G::Scalar::zero();
+    let mut result = G::Scalar::zero();
 
     for i in 0..a.len() {
       result += a[i] * b[i];

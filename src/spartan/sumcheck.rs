@@ -4,7 +4,7 @@ use super::polynomial::MultilinearPolynomial;
 use crate::errors::NovaError;
 use crate::traits::{AppendToTranscriptTrait, ChallengeTrait, Group};
 use crate::traits::commitment::{CommitmentEngineTrait, CompressedCommitmentTrait, CommitmentTrait, CommitmentGensTrait};
-use crate::{Commitment, CommitmentGens, CompressedCommitment};
+use crate::{CommitmentGens, CompressedCommitment};
 use core::marker::PhantomData;
 use super::nizk::DotProductProof;
 use crate::CE;
@@ -13,7 +13,6 @@ use merlin::Transcript;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use rand::rngs::OsRng;
-use core::iter;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -341,7 +340,7 @@ impl<G: Group> ZKSumcheckProof<G> {
       r.push(r_i);
     }
 
-    Ok((self.comm_evals[self.comm_evals.len()-1],  r))
+    Ok((self.comm_evals[self.comm_evals.len()-1].clone(),  r))
   }
 
 
@@ -355,7 +354,7 @@ impl<G: Group> ZKSumcheckProof<G> {
     gens_1: &CommitmentGens<G>, // generator of size 1
     gens_n: &CommitmentGens<G>, // generators of size n
     transcript: &mut Transcript,
-  ) -> (Self, Vec<G::Scalar>, Vec<G::Scalar>, G::Scalar)
+  ) -> Result<(Self, Vec<G::Scalar>, Vec<G::Scalar>, G::Scalar), NovaError>
     where F: Fn(&G::Scalar, &G::Scalar) -> G::Scalar,
   {
     let (blinds_poly, blinds_evals) = {
@@ -369,12 +368,12 @@ impl<G: Group> ZKSumcheckProof<G> {
       )
     };
 
-    let mut claim_per_round = *claim;
-    let mut comm_claim_per_round = CE::<G>::commit(&gens_1, &claim_per_round, &blind_claim); 
+    let mut claim_per_round = claim.clone();
+    let mut comm_claim_per_round = CE::<G>::commit(&gens_1, &[claim_per_round], &blind_claim).compress(); 
 
     let mut r = Vec::new();
     let mut comm_polys = Vec::new();
-    let mut comm_evals = Vec::New();
+    let mut comm_evals = Vec::new();
     let mut proofs = Vec::new();
 
     for j in 0..num_rounds {
@@ -394,8 +393,8 @@ impl<G: Group> ZKSumcheckProof<G> {
         }
 
         let evals = vec![eval_point_0, claim_per_round - eval_point_0, eval_point_2];
-        let poly = UniPoly::from_evals(&evals);
-        let comm_poly = CE::<G>::commit(gens_n, &poly, &blinds_poly[j]).compress();
+        let poly = UniPoly::<G>::from_evals(&evals);
+        let comm_poly = CE::<G>::commit(gens_n, &poly.coeffs, &blinds_poly[j]).compress();
         (poly, comm_poly)
       };
     
@@ -414,7 +413,7 @@ impl<G: Group> ZKSumcheckProof<G> {
       // produce a proof of sum-check an of evaluation
       let (proof, claim_next_round, comm_claim_next_round) = {
         let eval = poly.evaluate(&r_j);
-        let comm_eval = CE::<G>::commit(gens_1, &eval, &blinds_evals[j]).compress();
+        let comm_eval = CE::<G>::commit(gens_1, &[eval], &blinds_evals[j]).compress();
 
         // we need to prove the following under homomorphic commitments:
         // (1) poly(0) + poly(1) = claim_per_round
@@ -435,16 +434,11 @@ impl<G: Group> ZKSumcheckProof<G> {
 
         // compute a weighted sum of the RHS
         let target = w0 * claim_per_round + w1 * eval;
+        let decompressed_comm_claim_per_round = comm_claim_per_round.decompress()?;
+        let decompressed_comm_eval = comm_eval.decompress()?;
 
+        let comm_target = (decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1).compress(); 
 
-        let comm_target = G::vartime_multiscalar_mul(
-          &[w0, w1], 
-          iter::once(&comm_claim_per_round)
-            .chain(iter::once(&comm_eval))
-            .map(|pt| pt.decompress().unwrap())
-            .collect::<Vec<G::PreprocessedGroupElement>>(),
-        )
-        .compress();
 
         let blind = {
           let blind_sc = if j == 0 {
@@ -458,7 +452,7 @@ impl<G: Group> ZKSumcheckProof<G> {
           w0 * blind_sc + w1 * blind_eval
         };
 
-        assert_eq!(CE::<G>::commit(gens_1, &target, &blind).compress(), comm_target);
+        assert_eq!(CE::<G>::commit(gens_1, &[target], &blind).compress(), comm_target);
 
         let a = {
           // the vector to use to decommit for sum-check test
@@ -470,7 +464,7 @@ impl<G: Group> ZKSumcheckProof<G> {
 
           // the vector to use to decommit for evaluation
           let a_eval = {
-            let mut a = vec![G::Scalar::one(); poly_degree() + 1];
+            let mut a = vec![G::Scalar::one(); poly.degree() + 1];
             for j in 1..a.len() {
               a[j] = a[j-1] * r_j;
             }
@@ -488,7 +482,7 @@ impl<G: Group> ZKSumcheckProof<G> {
           gens_1,
           gens_n,
           transcript,
-          &poly.as_vec(),
+          &poly.coeffs,
           &blinds_poly[j],
           &a,
           &target,
@@ -503,14 +497,14 @@ impl<G: Group> ZKSumcheckProof<G> {
 
       proofs.push(proof);
       r.push(r_j);
-      comm_evals.push(comm_claim_per_round);
+      comm_evals.push(comm_claim_per_round.clone());
     }
 
-    (ZKSumcheckProof::new(comm_polys, comm_evals, proofs),
+    Ok((ZKSumcheckProof::new(comm_polys, comm_evals, proofs),
     r,
     vec![poly_A[0], poly_B[0]],
     blinds_evals[num_rounds - 1],
-    )
+    ))
   }
 
 
@@ -526,13 +520,30 @@ impl<G: Group> ZKSumcheckProof<G> {
     gens_1: &CommitmentGens<G>, // generator of size 1
     gens_n: &CommitmentGens<G>, // generators of size n
     transcript: &mut Transcript,
-  ) -> (Self, Vec<G::Scalar>, Vec<G::Scalar>, G::Scalar)
+  ) -> Result<(Self, Vec<G::Scalar>, Vec<G::Scalar>, G::Scalar), NovaError>
     where 
         F: Fn(&G::Scalar, &G::Scalar, &G::Scalar, &G::Scalar) -> G::Scalar,
   {
-    unimplemented!();
 
-/*
+    let (blinds_poly, blinds_evals) = {
+      (
+       (0..num_rounds)
+        .map(|_i| G::Scalar::random(&mut OsRng))
+        .collect::<Vec<G::Scalar>>(),
+      (0..num_rounds)
+        .map(|_i| G::Scalar::random(&mut OsRng))
+        .collect::<Vec<G::Scalar>>(),
+      )
+    };
+
+    let mut claim_per_round = *claim;
+    let mut comm_claim_per_round = CE::<G>::commit(gens_1, &[claim_per_round], blind_claim).compress();
+
+    let mut r = Vec::new();
+    let mut comm_polys = Vec::new();
+    let mut comm_evals = Vec::new();
+    let mut proofs = Vec::new();
+
     for j in 0..num_rounds {
       let (poly, comm_poly) = {
         let mut eval_point_0 = G::Scalar::zero();
@@ -580,11 +591,123 @@ impl<G: Group> ZKSumcheckProof<G> {
           eval_point_3,
         ];
 
-        let poly = UniPoly::from_evals(&evals);
+        let poly = UniPoly::<G>::from_evals(&evals);
         let comm_poly = CE::<G>::commit(gens_n, &poly.coeffs, &blinds_poly[j]).compress();
         (poly, comm_poly)
       };
-*/
+
+      // append the prover's message to the transcript
+      comm_poly.append_to_transcript(b"comm_poly", transcript);
+      comm_polys.push(comm_poly);
+
+
+      // derive the verifier's challenge for the next round
+      let r_j = G::Scalar::challenge(b"challenge_nextround", transcript);
+
+      // bound all tables to the verifier's challenge
+      poly_A.bound_poly_var_top(&r_j);
+      poly_B.bound_poly_var_top(&r_j);
+      poly_C.bound_poly_var_top(&r_j);
+      poly_D.bound_poly_var_top(&r_j);
+
+      
+      // produce a proof of sum-check and of evaluation
+      let (proof, claim_next_round, comm_claim_next_round) = {
+        let eval = poly.evaluate(&r_j);
+        let comm_eval = CE::<G>::commit(gens_1, &[eval], &blinds_evals[j]).compress();
+
+        // we need to prove the following under homomorphic commitments:
+        // (1) poly(0) + poly(1) = claim_per_round
+        // (2) poly(r_j) = eval
+
+        // Our technique is to leverage dot product proofs:
+        // (1) we can prove: <poly_in_coeffs_form, (2, 1, 1, 1)> = claim_per_round
+        // (2) we can prove: <poly_in_coeffs_form, (1, r_j, r^2_j, ..) = eval
+        // for efficiency we batch them using random weights
+
+        // add two claims to transcript
+
+        comm_claim_per_round.append_to_transcript(b"comm_claim_per_round", transcript);
+        comm_eval.append_to_transcript(b"comm_eval", transcript);
+
+        // produce two weights
+        let w0 = G::Scalar::challenge(b"combine_two_claims_to_one_0", transcript);
+        let w1 = G::Scalar::challenge(b"combine_two_claims_to_one_1", transcript);
+
+        let decompressed_comm_claim_per_round = comm_claim_per_round.decompress()?;
+        let decompressed_comm_eval = comm_eval.decompress()?;
+
+        // compute a weighted sum of the RHS
+        let target = claim_per_round * w0 + eval * w1;
+        let comm_target = (decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1).compress();
+
+
+        let blind = {
+          let blind_sc = if j == 0 {
+            blind_claim
+          } else {
+            &blinds_evals[j-1]
+          };
+
+          let blind_eval = &blinds_evals[j];
+
+          w0 * blind_sc + w1 * blind_eval
+        };
+
+        assert_eq!(CE::<G>::commit(gens_1, &[target], &blind).compress(), comm_target);
+
+        let a = {
+          // the vector to use to decommit for sum-check test
+          let a_sc = {
+            let mut a = vec![G::Scalar::one(); poly.degree() + 1];
+            a[0] += G::Scalar::one();
+            a
+          };
+
+          // the vector to use to decommit for evaluation
+          let a_eval = {
+            let mut a = vec![G::Scalar::one(); poly.degree() + 1];
+            for j in 1..a.len() {
+              a[j] = a[j-1] * r_j;
+            }
+            a
+          };
+
+          // take weighted sum of the two vectors using w
+          assert_eq!(a_sc.len(), a_eval.len());
+
+          (0..a_sc.len())
+            .map(|i| w0 * a_sc[i] + w1 * a_eval[i])
+            .collect::<Vec<G::Scalar>>()
+        };
+
+        let (proof, _comm_poly, _comm_sc_eval) = DotProductProof::<G>::prove(
+          gens_1,
+          gens_n,
+          transcript,
+          &poly.coeffs,
+          &blinds_poly[j],
+          &a,
+          &target,
+          &blind,
+        );
+
+        (proof, eval, comm_eval)
+      };
+
+      proofs.push(proof);
+      claim_per_round = claim_next_round;
+      comm_claim_per_round = comm_claim_next_round;
+      r.push(r_j);
+      comm_evals.push(comm_claim_per_round.clone());
+    }
+
+    Ok((
+        ZKSumcheckProof::new(comm_polys, comm_evals, proofs),
+        r,
+        vec![poly_A[0], poly_B[0], poly_C[0], poly_D[0]],
+        blinds_evals[num_rounds-1],
+    ))
   }
 
 }
