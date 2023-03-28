@@ -2,9 +2,9 @@
 #![allow(clippy::type_complexity)]
 use super::polynomial::MultilinearPolynomial;
 use crate::errors::NovaError;
-use crate::traits::{AppendToTranscriptTrait, ChallengeTrait, Group, evaluation::EvaluationEngineTrait};
-use crate::traits::commitment::CommitmentEngineTrait;
-use crate::{Commitment, CommitmentGens};
+use crate::traits::{AppendToTranscriptTrait, ChallengeTrait, Group};
+use crate::traits::commitment::{CommitmentEngineTrait, CompressedCommitmentTrait, CommitmentTrait, CommitmentGensTrait};
+use crate::{Commitment, CommitmentGens, CompressedCommitment};
 use core::marker::PhantomData;
 use super::nizk::DotProductProof;
 use crate::CE;
@@ -13,6 +13,7 @@ use merlin::Transcript;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use rand::rngs::OsRng;
+use core::iter;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -228,8 +229,8 @@ impl<G: Group> SumcheckProof<G> {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(bound = "")]
 pub(crate) struct ZKSumcheckProof<G: Group> {
-  comm_polys: Vec<Commitment<G>>,
-  comm_evals: Vec<Commitment<G>>,
+  comm_polys: Vec<CompressedCommitment<G>>,
+  comm_evals: Vec<CompressedCommitment<G>>,
   proofs: Vec<DotProductProof<G>>,
 }
 
@@ -237,8 +238,8 @@ pub(crate) struct ZKSumcheckProof<G: Group> {
 impl<G: Group> ZKSumcheckProof<G> {
 
   pub fn new(
-    comm_polys: Vec<Commitment<G>>,
-    comm_evals: Vec<Commitment<G>>,
+    comm_polys: Vec<CompressedCommitment<G>>,
+    comm_evals: Vec<CompressedCommitment<G>>,
     proofs: Vec<DotProductProof<G>>,
   ) -> Self {
     Self {
@@ -248,18 +249,18 @@ impl<G: Group> ZKSumcheckProof<G> {
     }
   }
 
-
   pub fn verify(
     &self,
-    comm_claim: &Commitment<G>,
+    comm_claim: &CompressedCommitment<G>,
     num_rounds: usize,
     degree_bound: usize,
     gens_1: &CommitmentGens<G>, // generator of size 1
     gens_n: &CommitmentGens<G>, // generators of size n
     transcript: &mut Transcript,
-  )-> Result<(Commitment<G>, Vec<G::Scalar>), NovaError> {
+  )-> Result<(CompressedCommitment<G>, Vec<G::Scalar>), NovaError> {
+
     // verify degree bound
-    if gens_n.gens.len() != degree_bound + 1 {
+    if gens_n.len() != degree_bound + 1 {
       return Err(NovaError::InvalidSumcheckProof);
     }
 
@@ -299,9 +300,13 @@ impl<G: Group> ZKSumcheckProof<G> {
         let w0 = G::Scalar::challenge(b"combine_two_claims_to_one_w0", transcript);
         let w1 = G::Scalar::challenge(b"combine_two_claims_to_one_w1", transcript);
 
+
+        let decompressed_comm_claim_per_round = comm_claim_per_round.decompress()?;
+        let decompressed_comm_eval = comm_eval.decompress()?;
+
         // compute a weighted sum of the RHS
-        let comm_target = G::vartime_multiscalar_mul(&[w0, w1], &comm_claim_per_round).compress();
-        //TODO: Not sure if above is right. This is line 127 in Spartan's sumcheck
+        let comm_target = decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1;
+        let compressed_comm_target = comm_target.compress();
 
         let a = {
           // the vector to use for decommit for sum-check test
@@ -326,8 +331,7 @@ impl<G: Group> ZKSumcheckProof<G> {
         };
 
          self.proofs[i].verify(gens_1, gens_n, transcript, &a, &self.comm_polys[i],
-         &comm_target).is_ok()
-         
+         &compressed_comm_target).is_ok()
       };
 
       if !res {
@@ -430,7 +434,9 @@ impl<G: Group> ZKSumcheckProof<G> {
         let w1 = G::Scalar::challenge(b"combine_two_claims_to_one_1", transcript);
 
         // compute a weighted sum of the RHS
-        let target = w[0] * claim_per_round + w1 * eval;
+        let target = w0 * claim_per_round + w1 * eval;
+
+
         let comm_target = G::vartime_multiscalar_mul(
           &[w0, w1], 
           iter::once(&comm_claim_per_round)
