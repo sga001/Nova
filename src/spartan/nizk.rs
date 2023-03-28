@@ -3,8 +3,8 @@
 use crate::errors::NovaError;
 use crate::traits::{
   commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait},  
-  AppendToTranscriptTrait, ChallengeTrait, Group, evaluation::EvaluationEngineTrait};
-use crate::{Commitment, CommitmentGens, CompressedCommitment, CE};
+  AppendToTranscriptTrait, ChallengeTrait, Group};
+use crate::{CommitmentGens, CompressedCommitment, CE};
 use ff::Field;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,13 @@ impl<G: Group> DotProductProof<G> {
 
   pub fn compute_dotproduct(a: &[G::Scalar], b: &[G::Scalar]) -> G::Scalar {
     assert_eq!(a.len(), b.len());
-    (0..a.len()).map(|i| a[i] * b[i]).sum()
+    let result = G::Scalar::zero();
+
+    for i in 0..a.len() {
+      result += a[i] * b[i];
+    }
+
+    result
   }
 
   pub fn prove(
@@ -43,12 +49,12 @@ impl<G: Group> DotProductProof<G> {
     y: &G::Scalar,
     blind_y: &G::Scalar,
   ) -> (Self, CompressedCommitment<G>, CompressedCommitment<G>) {
-    transcript.append_message(b"protocol-name", DotProductProof::protocol_name());
+    transcript.append_message(b"protocol-name", DotProductProof::<G>::protocol_name());
 
     let n = x_vec.len();
     assert_eq!(x_vec.len(), a_vec.len());
-    assert_eq!(gens_n.gens.len(), a_vec.len());
-    assert_eq!(gens_1.gens.len(), 1);
+    assert_eq!(gens_n.len(), a_vec.len());
+    assert_eq!(gens_1.len(), 1);
 
     // produce randomness for the proofs
     let d_vec = (0..n)
@@ -70,7 +76,7 @@ impl<G: Group> DotProductProof<G> {
     let delta = CE::<G>::commit(gens_n, &d_vec, &r_delta).compress();
     delta.append_to_transcript(b"delta", transcript);
 
-    let dotproduct_a_d = DotProductProof::compute_dotproduct(a_vec, &d_vec);
+    let dotproduct_a_d = DotProductProof::<G>::compute_dotproduct(a_vec, &d_vec);
 
     let beta = CE::<G>::commit(gens_1, &[dotproduct_a_d], &r_beta).compress();
     beta.append_to_transcript(b"beta", transcript);
@@ -107,10 +113,10 @@ impl<G: Group> DotProductProof<G> {
     Cx: &CompressedCommitment<G>,
     Cy: &CompressedCommitment<G>,
   )-> Result<(), NovaError> {
-    assert_eq!(gens_n.gens.len(), a_vec.len());  
-    assert_eq!(gens_1.gens.len(), 1);
+    assert_eq!(gens_n.len(), a_vec.len());  
+    assert_eq!(gens_1.len(), 1);
 
-    transcript.append_message(b"protocol-name", DotProductProof::protocol_name());
+    transcript.append_message(b"protocol-name", DotProductProof::<G>::protocol_name());
 
     Cx.append_to_transcript(b"Cx", transcript);
     Cy.append_to_transcript(b"Cy", transcript);
@@ -124,7 +130,7 @@ impl<G: Group> DotProductProof<G> {
       Cx.decompress()? * c  + self.delta.decompress()? == 
       CE::<G>::commit(gens_n, &self.z, &self.z_delta);
 
-    let dotproduct_z_a = DotProductProof::compute_dotproduct(&self.z, a_vec);
+    let dotproduct_z_a = DotProductProof::<G>::compute_dotproduct(&self.z, a_vec);
     result &= Cy.decompress()? * c + self.beta.decompress()?
       == CE::<G>::commit(gens_1, &[dotproduct_z_a], &self.z_beta);
 

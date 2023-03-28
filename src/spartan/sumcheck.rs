@@ -12,6 +12,7 @@ use ff::Field;
 use merlin::Transcript;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use rand::rngs::OsRng;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -356,10 +357,10 @@ impl<G: Group> ZKSumcheckProof<G> {
     let (blinds_poly, blinds_evals) = {
       (
        (0..num_rounds)
-        .map(|_i| G::Scalar::Random())
+        .map(|_i| G::Scalar::random(&mut OsRng))
         .collect::<Vec<G::Scalar>>(),
       (0..num_rounds)
-        .map(|_i| G::Scalar::Random())
+        .map(|_i| G::Scalar::random(&mut OsRng))
         .collect::<Vec<G::Scalar>>(),
       )
     };
@@ -369,7 +370,7 @@ impl<G: Group> ZKSumcheckProof<G> {
 
     let mut r = Vec::new();
     let mut comm_polys = Vec::new();
-    let mut comm_evals: Vec::New();
+    let mut comm_evals = Vec::New();
     let mut proofs = Vec::new();
 
     for j in 0..num_rounds {
@@ -384,7 +385,7 @@ impl<G: Group> ZKSumcheckProof<G> {
 
           // eval 2: bound_func is -A(low) + 2*A(high)
           let poly_A_bound_point = poly_A[len+i] + poly_A[len+i] - poly_A[i];
-          let poly_B_bound_point = poly_B[len+i] + poly_B[len+i] - poly_ABi];
+          let poly_B_bound_point = poly_B[len+i] + poly_B[len+i] - poly_B[i];
           eval_point_2 += comb_func(&poly_A_bound_point, &poly_B_bound_point);
         }
 
@@ -578,9 +579,7 @@ impl<G: Group> ZKSumcheckProof<G> {
         (poly, comm_poly)
       };
 */
-
   }
-
 
 }
 
