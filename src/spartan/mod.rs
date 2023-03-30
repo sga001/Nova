@@ -8,10 +8,12 @@ use crate::{
   errors::NovaError,
   r1cs::{R1CSGens, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{
+    commitment::CommitmentGensTrait,
     evaluation::EvaluationEngineTrait,
     snark::{ProverKeyTrait, RelaxedR1CSSNARKTrait, VerifierKeyTrait},
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
+  CommitmentGens,
 };
 use ff::Field;
 use itertools::concat;
@@ -19,13 +21,36 @@ use merlin::Transcript;
 use polynomial::{EqPolynomial, MultilinearPolynomial, SparsePolynomial};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use sumcheck::SumcheckProof;
+use sumcheck::ZKSumcheckProof;
+
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct SumcheckGens<G: Group> {
+  pub gens_1: CommitmentGens<G>,
+  pub gens_3: CommitmentGens<G>,
+  pub gens_4: CommitmentGens<G>,
+}
+
+impl<G: Group> SumcheckGens<G> {
+  pub fn new(label: &'static [u8]) -> Self {
+    let gens_1 = CommitmentGens::<G>::new(label, 1);
+    let gens_3 = CommitmentGens::<G>::new(label, 3);
+    let gens_4 = CommitmentGens::<G>::new(label, 4);
+
+    Self {
+      gens_1,
+      gens_3,
+      gens_4,
+    }
+  }
+}
 
 /// A type that represents the prover's key
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   gens: EE::EvaluationGens,
+  sumcheck_gens: SumcheckGens<G>,
   S: R1CSShape<G>,
 }
 
@@ -33,6 +58,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> ProverKeyTrait<G> for P
   fn new(gens: &R1CSGens<G>, S: &R1CSShape<G>) -> Self {
     ProverKey {
       gens: EE::setup(&gens.gens),
+      sumcheck_gens: SumcheckGens::<G>::new(b"sumcheck gens"),
       S: S.clone(),
     }
   }
@@ -43,6 +69,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> ProverKeyTrait<G> for P
 #[serde(bound = "")]
 pub struct VerifierKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   gens: EE::EvaluationGens,
+  sumcheck_gens: SumcheckGens<G>,
   S: R1CSShape<G>,
 }
 
@@ -52,6 +79,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> VerifierKeyTrait<G>
   fn new(gens: &R1CSGens<G>, S: &R1CSShape<G>) -> Self {
     VerifierKey {
       gens: EE::setup(&gens.gens),
+      sumcheck_gens: SumcheckGens::<G>::new(b"sumcheck gens"),
       S: S.clone(),
     }
   }
@@ -63,11 +91,11 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> VerifierKeyTrait<G>
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct RelaxedR1CSSNARK<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
-  sc_proof_outer: SumcheckProof<G>,
+  sc_proof_outer: ZKSumcheckProof<G>,
   claims_outer: (G::Scalar, G::Scalar, G::Scalar),
-  sc_proof_inner: SumcheckProof<G>,
-  eval_E: G::Scalar,
-  eval_W: G::Scalar,
+  sc_proof_inner: ZKSumcheckProof<G>,
+  eval_E: G::Scalar, // TODO: hide this
+  eval_W: G::Scalar, // TODO: hide this
   eval_arg: EE::EvaluationArgument,
 }
 
@@ -130,16 +158,20 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
        poly_C_comp: &G::Scalar,
        poly_D_comp: &G::Scalar|
        -> G::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
-    let (sc_proof_outer, r_x, claims_outer) = SumcheckProof::prove_cubic_with_additive_term(
+
+    let (sc_proof_outer, r_x, claims_outer, blind_claim_proof_outer) = ZKSumcheckProof::prove_cubic_with_additive_term(
       &G::Scalar::zero(), // claim is zero
+      &G::Scalar::zero(), // blind for claim is also zero
       num_rounds_x,
       &mut poly_tau,
       &mut poly_Az,
       &mut poly_Bz,
       &mut poly_uCz_E,
       comb_func_outer,
+      &pk.sumcheck_gens.gens_1,
+      &pk.sumcheck_gens.gens_4,
       &mut transcript,
-    );
+    )?;
 
     // claims from the end of sum-check
     let (claim_Az, claim_Bz): (G::Scalar, G::Scalar) = (claims_outer[1], claims_outer[2]);
@@ -157,6 +189,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let r_C = G::Scalar::challenge(b"challenge_rC", &mut transcript);
 
     let claim_inner_joint = r_A * claim_Az + r_B * claim_Bz + r_C * claim_Cz;
+    let blind_claim_inner_joint = G::Scalar::zero(); //TODO fix this later
 
     let poly_ABC = {
       // compute the initial evaluation table for R(\tau, x)
@@ -216,14 +249,20 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let comb_func = |poly_A_comp: &G::Scalar, poly_B_comp: &G::Scalar| -> G::Scalar {
       *poly_A_comp * *poly_B_comp
     };
-    let (sc_proof_inner, r_y, _claims_inner) = SumcheckProof::prove_quad(
+
+    let (sc_proof_inner, r_y, _claims_inner, blind_claim_postsc) = ZKSumcheckProof::prove_quad(
       &claim_inner_joint,
+      &blind_claim_inner_joint,
       num_rounds_y,
       &mut MultilinearPolynomial::new(poly_ABC),
       &mut MultilinearPolynomial::new(poly_z),
       comb_func,
+      &pk.sumcheck_gens.gens_1,
+      &pk.sumcheck_gens.gens_3,
       &mut transcript,
-    );
+    )?;
+
+    //TODO: use blind_claim_postsc
 
     let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
     eval_W.append_to_transcript(b"eval_W", &mut transcript);
@@ -275,6 +314,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let tau = (0..num_rounds_x)
       .map(|_i| G::Scalar::challenge(b"challenge_tau", &mut transcript))
       .collect::<Vec<G::Scalar>>();
+
+
+    //TODO: line 373 in r1csproof.rs in spartan
 
     let (claim_outer_final, r_x) =
       self
