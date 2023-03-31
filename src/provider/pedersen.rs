@@ -11,7 +11,7 @@ use crate::{
 use core::{
   fmt::Debug,
   marker::PhantomData,
-  ops::{Add, AddAssign, Mul, MulAssign},
+  ops::{Add, AddAssign, Mul, MulAssign, Sub},
 };
 use ff::Field;
 use merlin::Transcript;
@@ -196,6 +196,15 @@ impl<'a, 'b, G: Group> Add<&'b Commitment<G>> for &'a Commitment<G> {
   }
 }
 
+impl<'a, 'b, G: Group> Sub<&'b Commitment<G>> for &'a Commitment<G> {
+  type Output = Commitment<G>;
+  fn sub(self, other: &'b Commitment<G>) -> Commitment<G> {
+    Commitment {
+      comm: self.comm - other.comm,
+    }
+  }
+}
+
 macro_rules! define_add_variants {
   (G = $g:path, LHS = $lhs:ty, RHS = $rhs:ty, Output = $out:ty) => {
     impl<'b, G: $g> Add<&'b $rhs> for $lhs {
@@ -221,6 +230,32 @@ macro_rules! define_add_variants {
   };
 }
 
+macro_rules! define_sub_variants {
+  (G = $g:path, LHS = $lhs:ty, RHS = $rhs:ty, Output = $out:ty) => {
+    impl<'b, G: $g> Sub<&'b $rhs> for $lhs {
+      type Output = $out;
+      fn sub(self, rhs: &'b $rhs) -> $out {
+        &self - rhs
+      }
+    }
+
+    impl<'a, G: $g> Sub<$rhs> for &'a $lhs {
+      type Output = $out;
+      fn sub(self, rhs: $rhs) -> $out {
+        self - &rhs
+      }
+    }
+
+    impl<G: $g> Sub<$rhs> for $lhs {
+      type Output = $out;
+      fn sub(self, rhs: $rhs) -> $out {
+        &self - &rhs
+      }
+    }
+  };
+}
+
+
 macro_rules! define_add_assign_variants {
   (G = $g:path, LHS = $lhs:ty, RHS = $rhs:ty) => {
     impl<G: $g> AddAssign<$rhs> for $lhs {
@@ -233,6 +268,7 @@ macro_rules! define_add_assign_variants {
 
 define_add_assign_variants!(G = Group, LHS = Commitment<G>, RHS = Commitment<G>);
 define_add_variants!(G = Group, LHS = Commitment<G>, RHS = Commitment<G>, Output = Commitment<G>);
+define_sub_variants!(G = Group, LHS = Commitment<G>, RHS = Commitment<G>, Output = Commitment<G>);
 
 /// Provides a commitment engine
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

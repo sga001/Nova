@@ -6,7 +6,7 @@ use crate::{
 };
 use core::{
   fmt::Debug,
-  ops::{Add, AddAssign, Mul, MulAssign},
+  ops::{Add, AddAssign, Mul, MulAssign, Sub},
 };
 use serde::{Deserialize, Serialize};
 
@@ -42,12 +42,12 @@ pub trait CommitmentGensTrait<G: Group>:
 
 /// Defines basic operations on commitments
 pub trait CommitmentOps<Rhs = Self, Output = Self>:
-  Add<Rhs, Output = Output> + AddAssign<Rhs>
+  Add<Rhs, Output = Output> + AddAssign<Rhs> + Sub<Rhs, Output= Output>
 {
 }
 
 impl<T, Rhs, Output> CommitmentOps<Rhs, Output> for T where
-  T: Add<Rhs, Output = Output> + AddAssign<Rhs>
+  T: Add<Rhs, Output = Output> + AddAssign<Rhs> + Sub<Rhs, Output = Output>
 {
 }
 
