@@ -10,6 +10,32 @@ use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 use rand::rngs::OsRng;
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct KnowledgeProof<G: Group> {
+  alpha: CompressedCommitment<G>,
+  z1: G::Scalar,
+  z2: G::Scalar,
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct EqualityProof<G: Group> {
+  alpha: CompressedCommitment<G>,
+  z: G::Scalar,
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct ProductProof<G: Group> {
+  alpha: CompressedCommitment<G>,
+  beta: CompressedCommitment<G>,
+  delta: CompressedCommitment<G>,
+  z: [G::Scalar; 5],
+}
+
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -20,6 +46,258 @@ pub struct DotProductProof<G: Group> {
   z_delta: G::Scalar,
   z_beta: G::Scalar,
 }
+
+
+impl<G: Group> KnowledgeProof<G> {
+  fn protocol_name() -> &'static [u8] {
+    b"knowledge proof"
+  }
+
+  pub fn prove(
+    gens_n: &CommitmentGens<G>,
+    transcript: &mut Transcript,
+    x: &G::Scalar,
+    r: &G::Scalar,
+  ) -> Result<(KnowledgeProof<G>, CompressedCommitment<G>), NovaError> {
+    transcript.append_message(b"protocol-name", KnowledgeProof::<G>::protocol_name());
+
+    // produce two random scalars
+    let t1 = G::Scalar::random(&mut OsRng);
+    let t2 = G::Scalar::random(&mut OsRng);
+
+
+    let C = G::CE::commit(gens_n, &[x.clone()], r).compress();
+    C.append_to_transcript(b"C", transcript);
+
+    let alpha = G::CE::commit(gens_n, &[t1], &t2).compress();
+    alpha.append_to_transcript(b"alpha", transcript);
+
+    let c = G::Scalar::challenge(b"c", transcript);
+
+    let z1 = *x * c + t1;
+    let z2 = *r * c + t2;
+
+    Ok((Self { alpha, z1, z2 }, C))
+  }
+
+  pub fn verify(
+    &self,
+    gens_n: &CommitmentGens<G>,
+    transcript: &mut Transcript,
+    C: &CompressedCommitment<G>,
+  ) -> Result<(), NovaError> {
+    transcript.append_message(b"protocol-name", KnowledgeProof::<G>::protocol_name());
+    C.append_to_transcript(b"C", transcript);
+    self.alpha.append_to_transcript(b"alpha", transcript);
+
+    let c = G::Scalar::challenge(b"c", transcript);
+
+    let lhs = G::CE::commit(gens_n, &[self.z1.clone()], &self.z2).compress();
+    let rhs = (C.decompress()? * c + self.alpha.decompress()?).compress();
+
+    if lhs == rhs {
+      Ok(())
+    } else {
+      Err(NovaError::InvalidKnowledgeProof)
+    }
+  }
+}
+
+
+impl<G: Group> EqualityProof<G> {
+  fn protocol_name() -> &'static [u8] {
+    b"equality proof"
+  }
+
+  pub fn prove(
+    gens_n: &CommitmentGens<G>,
+    transcript: &mut Transcript,
+    v1: &G::Scalar,
+    s1: &G::Scalar,
+    v2: &G::Scalar,
+    s2: &G::Scalar,
+  ) -> Result<(EqualityProof<G>, CompressedCommitment<G>, CompressedCommitment<G>), NovaError> {
+    transcript.append_message(b"protocol-name", EqualityProof::<G>::protocol_name());
+
+    // produce a random scalar
+    let r = G::Scalar::random(&mut OsRng);
+
+    let C1 = G::CE::commit(gens_n, &[v1.clone()], s1).compress();
+    C1.append_to_transcript(b"C1", transcript);
+
+    let C2 = G::CE::commit(gens_n, &[v2.clone()], s2).compress();
+    C2.append_to_transcript(b"C2", transcript);
+
+    let alpha = G::CE::commit(gens_n, &[G::Scalar::zero()], &r).compress(); // h^r 
+    alpha.append_to_transcript(b"alpha", transcript);                                                                         
+
+    let c = G::Scalar::challenge(b"c", transcript);
+
+    let z = c * (*s1 - *s2) + r;
+
+    Ok((Self { alpha, z }, C1, C2))
+  }
+
+  pub fn verify(
+    &self,
+    gens_n: &CommitmentGens<G>,
+    transcript: &mut Transcript,
+    C1: &CompressedCommitment<G>,
+    C2: &CompressedCommitment<G>,
+  ) -> Result<(), NovaError> {
+    transcript.append_message(b"protocol-name", EqualityProof::<G>::protocol_name());
+    C1.append_to_transcript(b"C1", transcript);
+    self.alpha.append_to_transcript(b"alpha", transcript);
+
+    let c = G::Scalar::challenge(b"c", transcript);
+
+    let rhs = {
+      let C = C1.decompress()? - C2.decompress()?;
+      (C * c + self.alpha.decompress()?).compress()
+    };
+
+
+    let lhs = G::CE::commit(gens_n, &[G::Scalar::zero()], &self.z).compress(); // h^z
+
+    if lhs == rhs {
+      Ok(())
+    } else {
+      Err(NovaError::InvalidEqualityProof)
+    }
+  }
+}
+
+
+impl<G: Group> ProductProof<G> {
+  fn protocol_name() -> &'static [u8] {
+    b"product proof"
+  }
+
+  pub fn prove(
+    gens_n: &CommitmentGens<G>,
+    transcript: &mut Transcript,
+    x: &G::Scalar,
+    rX: &G::Scalar,
+    y: &G::Scalar,
+    rY: &G::Scalar,
+    z: &G::Scalar,
+    rZ: &G::Scalar,
+  ) -> Result<(ProductProof<G>, CompressedCommitment<G>, CompressedCommitment<G>, CompressedCommitment<G>), NovaError> {
+    transcript.append_message(b"protocol-name", ProductProof::<G>::protocol_name());
+
+    // produce 5 random scalars
+    let b1 = G::Scalar::random(&mut OsRng);
+    let b2 = G::Scalar::random(&mut OsRng);
+    let b3 = G::Scalar::random(&mut OsRng);
+    let b4 = G::Scalar::random(&mut OsRng);
+    let b5 = G::Scalar::random(&mut OsRng);
+
+    let X = G::CE::commit(gens_n, &[x.clone()], rX).compress();
+    X.append_to_transcript(b"X", transcript);
+
+    let Y = G::CE::commit(gens_n, &[y.clone()], rY).compress();
+    Y.append_to_transcript(b"Y", transcript);
+
+    let Z = G::CE::commit(gens_n, &[z.clone()], rZ).compress();
+    Z.append_to_transcript(b"Z", transcript);
+
+    let alpha = G::CE::commit(gens_n, &[b1], &b2).compress();
+    alpha.append_to_transcript(b"alpha", transcript);
+
+    let beta = G::CE::commit(gens_n, &[b3], &b4).compress();
+    beta.append_to_transcript(b"beta", transcript);
+
+    let delta = {
+      let h_to_b5 = G::CE::commit(gens_n, &[G::Scalar::zero()], &b5); // h^b5
+      (X.decompress()? * b3 + h_to_b5).compress()  // X^b3*h^b5
+    };
+
+    delta.append_to_transcript(b"delta", transcript);
+
+    let c = G::Scalar::challenge(b"c", transcript);
+
+    let z1 = b1 + c * *x;
+    let z2 = b2 + c * *rX;
+    let z3 = b3 + c * *y;
+    let z4 = b4 + c * *rY;
+    let z5 = b5 + c * (*rZ - *rX * *y);
+    let z = [z1, z2, z3, z4, z5];
+
+    Ok(( Self {
+        alpha,
+        beta,
+        delta,
+        z,
+      },
+      X,
+      Y,
+      Z,
+    ))
+  }
+
+  fn check_equality(
+    P: &CompressedCommitment<G>,
+    X: &CompressedCommitment<G>,
+    c: &G::Scalar,
+    gens_n: &CommitmentGens<G>,
+    z1: &G::Scalar,
+    z2: &G::Scalar,
+  ) -> Result<bool, NovaError> {
+    let lhs = (P.decompress()? + X.decompress()? * *c).compress();
+    let rhs = G::CE::commit(gens_n, &[*z1], z2).compress();
+
+    Ok(lhs == rhs)
+  }
+
+  pub fn verify(
+    &self,
+    gens_n: &CommitmentGens<G>,
+    transcript: &mut Transcript,
+    X: &CompressedCommitment<G>,
+    Y: &CompressedCommitment<G>,
+    Z: &CompressedCommitment<G>,
+  ) -> Result<(), NovaError> {
+    transcript.append_message(b"protocol-name", ProductProof::<G>::protocol_name());
+
+    X.append_to_transcript(b"X", transcript);
+    Y.append_to_transcript(b"Y", transcript);
+    Z.append_to_transcript(b"Z", transcript);
+    self.alpha.append_to_transcript(b"alpha", transcript);
+    self.beta.append_to_transcript(b"beta", transcript);
+    self.delta.append_to_transcript(b"delta", transcript);
+
+    let z1 = self.z[0];
+    let z2 = self.z[1];
+    let z3 = self.z[2];
+    let z4 = self.z[3];
+    let z5 = self.z[4];
+
+
+    let c = G::Scalar::challenge(b"c", transcript);
+
+    let res = ProductProof::<G>::check_equality(&self.alpha, X, &c, gens_n, &z1, &z2)?
+      && ProductProof::<G>::check_equality(&self.beta, Y, &c, gens_n, &z3, &z4)?;
+
+    let res2 = {
+      let lhs = (self.delta.decompress()? + Z.decompress()? * c).compress();
+
+      let h_to_z5 = G::CE::commit(gens_n, &[G::Scalar::zero()], &z5); // h^z5
+      let rhs = (X.decompress()? * z3 + h_to_z5).compress();  // X^z3*h^z5
+      lhs == rhs
+    };
+
+
+    if res && res2 {
+      Ok(())
+    } else {
+      Err(NovaError::InvalidProductProof)
+    }
+  }
+}
+
+
+
+
 
 
 impl<G: Group> DotProductProof<G> {
