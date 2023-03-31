@@ -21,7 +21,8 @@ use merlin::Transcript;
 use polynomial::{EqPolynomial, MultilinearPolynomial, SparsePolynomial};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use sumcheck::{SumcheckProof, ZKSumcheckProof};
+use sumcheck::ZKSumcheckProof;
+use nizk::{EqualityProof, KnowledgeProof, ProductProof};
 
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -92,10 +93,16 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> VerifierKeyTrait<G>
 #[serde(bound = "")]
 pub struct RelaxedR1CSSNARK<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   sc_proof_outer: ZKSumcheckProof<G>,
-  claims_outer: (G::Scalar, G::Scalar, G::Scalar),
-  sc_proof_inner: SumcheckProof<G>,
-  eval_E: G::Scalar, // TODO: hide this
-  eval_W: G::Scalar, // TODO: hide this
+  claims_outer: (
+    CompressedCommitment<G>, 
+    CompressedCommitment<G>,
+    CompressedCommitment<G>,
+    CompressedCommitment<G>,
+  ),
+  sc_proof_inner: ZKSumcheckProof<G>,
+  pok_claims_inner: (KnowledgeProof<G>, ProductProof<G>),
+  proof_eq_sc_outer: EqualityProof<G>,
+  proof_eq_sc_inner: EqualityProof<G>,
   eval_arg: EE::EvaluationArgument,
 }
 
@@ -113,13 +120,11 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
   ) -> Result<Self, NovaError> {
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
 
-
     // sanity check that R1CSShape has certain size characteristics
     assert_eq!(pk.S.num_cons.next_power_of_two(), pk.S.num_cons);
     assert_eq!(pk.S.num_vars.next_power_of_two(), pk.S.num_vars);
     assert_eq!(pk.S.num_io.next_power_of_two(), pk.S.num_io);
     assert!(pk.S.num_io < pk.S.num_vars);
-
 
     // append the R1CSShape and RelaxedR1CSInstance to the transcript
     pk.S.append_to_transcript(b"S", &mut transcript);
@@ -139,6 +144,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       .collect();
 
     let mut poly_tau = MultilinearPolynomial::new(EqPolynomial::new(tau).evals());
+
     let (mut poly_Az, mut poly_Bz, poly_Cz, mut poly_uCz_E) = {
       let (poly_Az, poly_Bz, poly_Cz) = pk.S.multiply_vec(&z)?;
       let poly_uCz_E = (0..pk.S.num_cons)
@@ -159,8 +165,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
        poly_D_comp: &G::Scalar|
        -> G::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
 
-    //TODO: use blind
-    let (sc_proof_outer, r_x, claims_outer, _blind_claim_proof_outer) = ZKSumcheckProof::prove_cubic_with_additive_term(
+    let (sc_proof_outer, r_x, _claims_outer, blind_claim_outer) = ZKSumcheckProof::prove_cubic_with_additive_term(
       &G::Scalar::zero(), // claim is zero
       &G::Scalar::zero(), // blind for claim is also zero
       num_rounds_x,
@@ -174,23 +179,71 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &mut transcript,
     )?;
 
-    // claims from the end of sum-check
-    let (claim_Az, claim_Bz): (G::Scalar, G::Scalar) = (claims_outer[1], claims_outer[2]);
+    assert_eq!(poly_tau.len(), 1);
+    assert_eq!(poly_Az.len(), 1);
+    assert_eq!(poly_Bz.len(), 1);
+    assert_eq!(poly_Cz.len(), 1);
 
-    claim_Az.append_to_transcript(b"claim_Az", &mut transcript);
-    claim_Bz.append_to_transcript(b"claim_Bz", &mut transcript);
-    let claim_Cz = poly_Cz.evaluate(&r_x);
-    let eval_E = MultilinearPolynomial::new(W.E.clone()).evaluate(&r_x);
-    claim_Cz.append_to_transcript(b"claim_Cz", &mut transcript);
-    eval_E.append_to_transcript(b"eval_E", &mut transcript);
+    let (tau_claim, Az_claim, Bz_claim, Cz_claim) = (&poly_tau[0], &poly_Az[0], &poly_Bz[0], &poly_Cz[0]);
+    let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
+      G::Scalar::random(&mut OsRng),
+      G::Scalar::random(&mut OsRng),
+      G::Scalar::random(&mut OsRng),
+      G::Scalar::random(&mut OsRng),
+    );
 
-    // inner sum-check
+    let (pok_Cz_claim, comm_Cz_claim) = {
+      KnowledgeProof::<G>::prove(
+        &pk.sumcheck_gens.gens_1,
+        &mut transcript,
+        Cz_claim,
+        &Cz_blind,
+      )
+    };
+
+
+    let (proof_prod, comm_Az_claim, comm_Bz_claim, comm_prod_Az_Bz_claims) = {
+      let prod = Az_claim * Bz_claim;
+      ProductProof::<G>::prove(
+        &pk.sumcheck_gens.gens_1,
+        &mut transcript,
+        Az_claim,
+        &Az_blind,
+        Bz_claim,
+        &Bz_blind,
+        &prod,
+        &prod_Az_Bz_blind,
+      )
+    };
+
+    comm_Az_claim.append_to_transcript(b"comm_Az_claim", transcript);
+    comm_Bz_claim.append_to_transcript(b"comm_Bz_claim", transcript);
+    comm_Cz_claim.append_to_transcript(b"comm_Cz_claim", transcript);
+    comm_prod_Az_Bz_claims.append_to_transcript(b"comm_prod_Az_Bz_claims", transcript);
+
+    // prove the final step of sumcheck outer
+    let tau_bound_rx = tau_claim;
+    let blind_expected_claim_outer = taus_bound_rx * (prod_Az_Bz_blind - Cz_blind);
+    let claim_post_outer = (Az_claim * Bz_claim - Cz_claim) * taus_bound_rx;
+
+    let (proof_eq_sc_outer, _C1, _C2) = EqualityProof::<G>::prove(
+      &pk.sumcheck_gens.gens_1,
+      &mut transcript,
+      &claim_post_outer,
+      &blind_expected_claim_outer,
+      &claim_post_outer,
+      &blind_claim_outer,
+    );
+
+
+    // Combine the three claims into a single claim
     let r_A = G::Scalar::challenge(b"challenge_rA", &mut transcript);
     let r_B = G::Scalar::challenge(b"challenge_rB", &mut transcript);
     let r_C = G::Scalar::challenge(b"challenge_rC", &mut transcript);
 
-    let claim_inner_joint = r_A * claim_Az + r_B * claim_Bz + r_C * claim_Cz;
-    //let blind_claim_inner_joint = G::Scalar::zero(); //TODO fix this later
+    let claim_inner_joint = r_A * Az_claim + r_B * Bz_claim + r_C * Cz_claim;
+    let blind_claim_inner_joint = r_A * Az_blind + r_B * Bz_blind + r_C * Cz_blind;
+
 
     let poly_ABC = {
       // compute the initial evaluation table for R(\tau, x)
@@ -251,19 +304,40 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       *poly_A_comp * *poly_B_comp
     };
 
-    let (sc_proof_inner, r_y, _claims_inner) = SumcheckProof::prove_quad(
+    let (sc_proof_inner, r_y, claims_inner, blind_claim_postsc_inner) = ZKSumcheckProof::prove_quad(
       &claim_inner_joint,
-//      &blind_claim_inner_joint,
+      &blind_claim_inner_joint,
       num_rounds_y,
       &mut MultilinearPolynomial::new(poly_ABC),
       &mut MultilinearPolynomial::new(poly_z),
       comb_func,
-//      &pk.sumcheck_gens.gens_1,
-//      &pk.sumcheck_gens.gens_3,
+      &pk.sumcheck_gens.gens_1,
+      &pk.sumcheck_gens.gens_3,
       &mut transcript,
     );
 
-    //TODO: use blind_claim_postsc
+    //TODO: this is messy. This is line 311 in r1csproof.rs in Spartan
+    // Key issue is that here we have to poly: eval_E and eval_W. So not
+    // clear what blind_eval should be.
+
+    // prove the final step of inner sumcheck
+    let blind_eval_Z_at_ry = (G::Scalar::one() - r_y[0]) * W.r_W.clone();
+    let blind_expected_claim_post_inner = claims_inner[1] * blind_eval_Z_at_ry;
+    let claim_post_inner = claims_inner[0] * claims_inner[1];
+
+
+    let (proof_eq_sc_inner, _C1, _C2) = EqualityProof::prove(
+      // TODO: pc_gens??,
+      &mut transcript,
+      &claim_post_inner,
+      &blind_expected_claim_post_inner,
+      &claim_post_inner,
+      &blind_claim_postsc_inner,
+    );
+
+
+    let eval_E = MultilinearPolynomial::new(W.E.clone()).evaluate(&r_x);
+    eval_E.append_to_transcript(b"eval_E", &mut transcript);
 
     let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
     eval_W.append_to_transcript(b"eval_W", &mut transcript);
@@ -277,6 +351,10 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &[r_x, r_y[1..].to_vec()],
       &[eval_E, eval_W],                 // y_vec in Hyrax
     )?;
+
+
+
+
 
     Ok(RelaxedR1CSSNARK {
       sc_proof_outer,
