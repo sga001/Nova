@@ -1,18 +1,20 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
+use super::nizk::DotProductProof;
 use super::polynomial::MultilinearPolynomial;
 use crate::errors::NovaError;
+use crate::traits::commitment::{
+  CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait,
+};
 use crate::traits::{AppendToTranscriptTrait, ChallengeTrait, Group};
-use crate::traits::commitment::{CommitmentEngineTrait, CompressedCommitmentTrait, CommitmentTrait, CommitmentGensTrait};
+use crate::CE;
 use crate::{CommitmentGens, CompressedCommitment};
 use core::marker::PhantomData;
-use super::nizk::DotProductProof;
-use crate::CE;
 use ff::Field;
 use merlin::Transcript;
+use rand::rngs::OsRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use rand::rngs::OsRng;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -224,7 +226,6 @@ impl<G: Group> SumcheckProof<G> {
   }
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(bound = "")]
 pub(crate) struct ZKSumcheckProof<G: Group> {
@@ -233,9 +234,7 @@ pub(crate) struct ZKSumcheckProof<G: Group> {
   proofs: Vec<DotProductProof<G>>,
 }
 
-
 impl<G: Group> ZKSumcheckProof<G> {
-
   pub fn new(
     comm_polys: Vec<CompressedCommitment<G>>,
     comm_evals: Vec<CompressedCommitment<G>>,
@@ -256,8 +255,7 @@ impl<G: Group> ZKSumcheckProof<G> {
     gens_1: &CommitmentGens<G>, // generator of size 1
     gens_n: &CommitmentGens<G>, // generators of size n
     transcript: &mut Transcript,
-  )-> Result<(CompressedCommitment<G>, Vec<G::Scalar>), NovaError> {
-
+  ) -> Result<(CompressedCommitment<G>, Vec<G::Scalar>), NovaError> {
     // verify degree bound
     if gens_n.len() != degree_bound + 1 {
       return Err(NovaError::InvalidSumcheckProof);
@@ -269,10 +267,10 @@ impl<G: Group> ZKSumcheckProof<G> {
     }
 
     let mut r = Vec::new();
-    
+
     for i in 0..self.comm_polys.len() {
       let comm_poly = &self.comm_polys[i];
-      
+
       // append the prover's polynomial to the transcript
       comm_poly.append_to_transcript(b"comm_poly", transcript);
 
@@ -285,7 +283,7 @@ impl<G: Group> ZKSumcheckProof<G> {
         let comm_claim_per_round = if i == 0 {
           comm_claim
         } else {
-          &self.comm_evals[i-1]
+          &self.comm_evals[i - 1]
         };
 
         let comm_eval = &self.comm_evals[i];
@@ -298,7 +296,6 @@ impl<G: Group> ZKSumcheckProof<G> {
         // produce two weights
         let w0 = G::Scalar::challenge(b"combine_two_claims_to_one_w0", transcript);
         let w1 = G::Scalar::challenge(b"combine_two_claims_to_one_w1", transcript);
-
 
         let decompressed_comm_claim_per_round = comm_claim_per_round.decompress()?;
         let decompressed_comm_eval = comm_eval.decompress()?;
@@ -319,18 +316,28 @@ impl<G: Group> ZKSumcheckProof<G> {
           let a_eval = {
             let mut a = vec![G::Scalar::one(); degree_bound + 1];
             for j in 1..a.len() {
-              a[j] = a[j-1] * r_i;
+              a[j] = a[j - 1] * r_i;
             }
             a
           };
 
           // take weighted sum of the two vectors using w
           assert_eq!(a_sc.len(), a_eval.len());
-          (0..a_sc.len()).map(|i| w0 * a_sc[i] + w1 * a_eval[i]).collect::<Vec<G::Scalar>>()
+          (0..a_sc.len())
+            .map(|i| w0 * a_sc[i] + w1 * a_eval[i])
+            .collect::<Vec<G::Scalar>>()
         };
 
-         self.proofs[i].verify(gens_1, gens_n, transcript, &a, &self.comm_polys[i],
-         &compressed_comm_target).is_ok()
+        self.proofs[i]
+          .verify(
+            gens_1,
+            gens_n,
+            transcript,
+            &a,
+            &self.comm_polys[i],
+            &compressed_comm_target,
+          )
+          .is_ok()
       };
 
       if !res {
@@ -340,9 +347,8 @@ impl<G: Group> ZKSumcheckProof<G> {
       r.push(r_i);
     }
 
-    Ok((self.comm_evals[self.comm_evals.len()-1].clone(),  r))
+    Ok((self.comm_evals[self.comm_evals.len() - 1].clone(), r))
   }
-
 
   pub fn prove_quad<F>(
     claim: &G::Scalar,
@@ -355,21 +361,23 @@ impl<G: Group> ZKSumcheckProof<G> {
     gens_n: &CommitmentGens<G>, // generators of size n
     transcript: &mut Transcript,
   ) -> Result<(Self, Vec<G::Scalar>, Vec<G::Scalar>, G::Scalar), NovaError>
-    where F: Fn(&G::Scalar, &G::Scalar) -> G::Scalar,
+  where
+    F: Fn(&G::Scalar, &G::Scalar) -> G::Scalar,
   {
     let (blinds_poly, blinds_evals) = {
       (
-       (0..num_rounds)
-        .map(|_i| G::Scalar::random(&mut OsRng))
-        .collect::<Vec<G::Scalar>>(),
-      (0..num_rounds)
-        .map(|_i| G::Scalar::random(&mut OsRng))
-        .collect::<Vec<G::Scalar>>(),
+        (0..num_rounds)
+          .map(|_i| G::Scalar::random(&mut OsRng))
+          .collect::<Vec<G::Scalar>>(),
+        (0..num_rounds)
+          .map(|_i| G::Scalar::random(&mut OsRng))
+          .collect::<Vec<G::Scalar>>(),
       )
     };
 
     let mut claim_per_round = claim.clone();
-    let mut comm_claim_per_round = CE::<G>::commit(&gens_1, &[claim_per_round], &blind_claim).compress(); 
+    let mut comm_claim_per_round =
+      CE::<G>::commit(&gens_1, &[claim_per_round], &blind_claim).compress();
 
     let mut r = Vec::new();
     let mut comm_polys = Vec::new();
@@ -381,14 +389,14 @@ impl<G: Group> ZKSumcheckProof<G> {
         let mut eval_point_0 = G::Scalar::zero();
         let mut eval_point_2 = G::Scalar::zero();
 
-        let len = poly_A.len()/2;
+        let len = poly_A.len() / 2;
         for i in 0..len {
           // eval 0: bound_func is A(low)
           eval_point_0 += comb_func(&poly_A[i], &poly_B[i]);
 
           // eval 2: bound_func is -A(low) + 2*A(high)
-          let poly_A_bound_point = poly_A[len+i] + poly_A[len+i] - poly_A[i];
-          let poly_B_bound_point = poly_B[len+i] + poly_B[len+i] - poly_B[i];
+          let poly_A_bound_point = poly_A[len + i] + poly_A[len + i] - poly_A[i];
+          let poly_B_bound_point = poly_B[len + i] + poly_B[len + i] - poly_B[i];
           eval_point_2 += comb_func(&poly_A_bound_point, &poly_B_bound_point);
         }
 
@@ -397,7 +405,6 @@ impl<G: Group> ZKSumcheckProof<G> {
         let comm_poly = CE::<G>::commit(gens_n, &poly.coeffs, &blinds_poly[j]).compress();
         (poly, comm_poly)
       };
-    
 
       // append the prover's message to the transcript
       comm_poly.append_to_transcript(b"comm_poly", transcript);
@@ -405,7 +412,7 @@ impl<G: Group> ZKSumcheckProof<G> {
 
       // derive the verifier's challenge for the next round
       let r_j = G::Scalar::challenge(b"challenge_nextround", transcript);
-      
+
       // bound all tables to the verifier's challenge
       poly_A.bound_poly_var_top(&r_j);
       poly_B.bound_poly_var_top(&r_j);
@@ -437,14 +444,14 @@ impl<G: Group> ZKSumcheckProof<G> {
         let decompressed_comm_claim_per_round = comm_claim_per_round.decompress()?;
         let decompressed_comm_eval = comm_eval.decompress()?;
 
-        let comm_target = (decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1).compress(); 
-
+        let comm_target =
+          (decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1).compress();
 
         let blind = {
           let blind_sc = if j == 0 {
             blind_claim
           } else {
-            &blinds_evals[j-1]
+            &blinds_evals[j - 1]
           };
 
           let blind_eval = &blinds_evals[j];
@@ -452,7 +459,10 @@ impl<G: Group> ZKSumcheckProof<G> {
           w0 * blind_sc + w1 * blind_eval
         };
 
-        assert_eq!(CE::<G>::commit(gens_1, &[target], &blind).compress(), comm_target);
+        assert_eq!(
+          CE::<G>::commit(gens_1, &[target], &blind).compress(),
+          comm_target
+        );
 
         let a = {
           // the vector to use to decommit for sum-check test
@@ -466,7 +476,7 @@ impl<G: Group> ZKSumcheckProof<G> {
           let a_eval = {
             let mut a = vec![G::Scalar::one(); poly.degree() + 1];
             for j in 1..a.len() {
-              a[j] = a[j-1] * r_j;
+              a[j] = a[j - 1] * r_j;
             }
             a
           };
@@ -500,13 +510,13 @@ impl<G: Group> ZKSumcheckProof<G> {
       comm_evals.push(comm_claim_per_round.clone());
     }
 
-    Ok((ZKSumcheckProof::new(comm_polys, comm_evals, proofs),
-    r,
-    vec![poly_A[0], poly_B[0]],
-    blinds_evals[num_rounds - 1],
+    Ok((
+      ZKSumcheckProof::new(comm_polys, comm_evals, proofs),
+      r,
+      vec![poly_A[0], poly_B[0]],
+      blinds_evals[num_rounds - 1],
     ))
   }
-
 
   pub fn prove_cubic_with_additive_term<F>(
     claim: &G::Scalar,
@@ -521,23 +531,23 @@ impl<G: Group> ZKSumcheckProof<G> {
     gens_n: &CommitmentGens<G>, // generators of size n
     transcript: &mut Transcript,
   ) -> Result<(Self, Vec<G::Scalar>, Vec<G::Scalar>, G::Scalar), NovaError>
-    where 
-        F: Fn(&G::Scalar, &G::Scalar, &G::Scalar, &G::Scalar) -> G::Scalar,
+  where
+    F: Fn(&G::Scalar, &G::Scalar, &G::Scalar, &G::Scalar) -> G::Scalar,
   {
-
     let (blinds_poly, blinds_evals) = {
       (
-       (0..num_rounds)
-        .map(|_i| G::Scalar::random(&mut OsRng))
-        .collect::<Vec<G::Scalar>>(),
-      (0..num_rounds)
-        .map(|_i| G::Scalar::random(&mut OsRng))
-        .collect::<Vec<G::Scalar>>(),
+        (0..num_rounds)
+          .map(|_i| G::Scalar::random(&mut OsRng))
+          .collect::<Vec<G::Scalar>>(),
+        (0..num_rounds)
+          .map(|_i| G::Scalar::random(&mut OsRng))
+          .collect::<Vec<G::Scalar>>(),
       )
     };
 
     let mut claim_per_round = *claim;
-    let mut comm_claim_per_round = CE::<G>::commit(gens_1, &[claim_per_round], blind_claim).compress();
+    let mut comm_claim_per_round =
+      CE::<G>::commit(gens_1, &[claim_per_round], blind_claim).compress();
 
     let mut r = Vec::new();
     let mut comm_polys = Vec::new();
@@ -571,10 +581,10 @@ impl<G: Group> ZKSumcheckProof<G> {
 
           // eval 3: bound_func is -2A(low) + 3A(high); computed incrementally with bound_func
           // applied to eval(2)
-          let poly_A_bound_point = poly_A_bound_point + poly_A[len+i] - poly_A[i];
-          let poly_B_bound_point = poly_B_bound_point + poly_B[len+i] - poly_B[i];
-          let poly_C_bound_point = poly_C_bound_point + poly_C[len+i] - poly_C[i];
-          let poly_D_bound_point = poly_D_bound_point + poly_D[len+i] - poly_D[i];
+          let poly_A_bound_point = poly_A_bound_point + poly_A[len + i] - poly_A[i];
+          let poly_B_bound_point = poly_B_bound_point + poly_B[len + i] - poly_B[i];
+          let poly_C_bound_point = poly_C_bound_point + poly_C[len + i] - poly_C[i];
+          let poly_D_bound_point = poly_D_bound_point + poly_D[len + i] - poly_D[i];
 
           eval_point_3 += comb_func(
             &poly_A_bound_point,
@@ -600,7 +610,6 @@ impl<G: Group> ZKSumcheckProof<G> {
       comm_poly.append_to_transcript(b"comm_poly", transcript);
       comm_polys.push(comm_poly);
 
-
       // derive the verifier's challenge for the next round
       let r_j = G::Scalar::challenge(b"challenge_nextround", transcript);
 
@@ -610,7 +619,6 @@ impl<G: Group> ZKSumcheckProof<G> {
       poly_C.bound_poly_var_top(&r_j);
       poly_D.bound_poly_var_top(&r_j);
 
-      
       // produce a proof of sum-check and of evaluation
       let (proof, claim_next_round, comm_claim_next_round) = {
         let eval = poly.evaluate(&r_j);
@@ -639,14 +647,14 @@ impl<G: Group> ZKSumcheckProof<G> {
 
         // compute a weighted sum of the RHS
         let target = claim_per_round * w0 + eval * w1;
-        let comm_target = (decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1).compress();
-
+        let comm_target =
+          (decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1).compress();
 
         let blind = {
           let blind_sc = if j == 0 {
             blind_claim
           } else {
-            &blinds_evals[j-1]
+            &blinds_evals[j - 1]
           };
 
           let blind_eval = &blinds_evals[j];
@@ -654,7 +662,10 @@ impl<G: Group> ZKSumcheckProof<G> {
           w0 * blind_sc + w1 * blind_eval
         };
 
-        assert_eq!(CE::<G>::commit(gens_1, &[target], &blind).compress(), comm_target);
+        assert_eq!(
+          CE::<G>::commit(gens_1, &[target], &blind).compress(),
+          comm_target
+        );
 
         let a = {
           // the vector to use to decommit for sum-check test
@@ -668,7 +679,7 @@ impl<G: Group> ZKSumcheckProof<G> {
           let a_eval = {
             let mut a = vec![G::Scalar::one(); poly.degree() + 1];
             for j in 1..a.len() {
-              a[j] = a[j-1] * r_j;
+              a[j] = a[j - 1] * r_j;
             }
             a
           };
@@ -703,13 +714,12 @@ impl<G: Group> ZKSumcheckProof<G> {
     }
 
     Ok((
-        ZKSumcheckProof::new(comm_polys, comm_evals, proofs),
-        r,
-        vec![poly_A[0], poly_B[0], poly_C[0], poly_D[0]],
-        blinds_evals[num_rounds-1],
+      ZKSumcheckProof::new(comm_polys, comm_evals, proofs),
+      r,
+      vec![poly_A[0], poly_B[0], poly_C[0], poly_D[0]],
+      blinds_evals[num_rounds - 1],
     ))
   }
-
 }
 
 // ax^2 + bx + c stored as vec![a,b,c]

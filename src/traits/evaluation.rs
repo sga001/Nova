@@ -22,7 +22,12 @@ pub trait EvaluationEngineTrait<G: Group>:
   type CE: CommitmentEngineTrait<G>;
 
   /// A type that holds generators
-  type EvaluationGens: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + GetGeneratorsTrait<G>;
+  type EvaluationGens: Clone
+    + Send
+    + Sync
+    + Serialize
+    + for<'de> Deserialize<'de>
+    + GetGeneratorsTrait<G>;
 
   /// A type that holds the evaluation argument
   type EvaluationArgument: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;

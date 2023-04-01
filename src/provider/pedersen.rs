@@ -45,7 +45,6 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
   type CompressedCommitment = CompressedCommitment<G::CompressedGroupElement>;
 
   fn new(label: &'static [u8], n: usize) -> Self {
-    
     let mut blinding_label = label.to_vec();
     blinding_label.extend(b"blinding factor");
     let blinding = G::from_label(&blinding_label, 1);
@@ -58,7 +57,11 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
     }
   }
 
-  fn new_with_blinding_gen(label: &'static [u8], n: usize, h: &G::PreprocessedGroupElement) -> Self {
+  fn new_with_blinding_gen(
+    label: &'static [u8],
+    n: usize,
+    h: &G::PreprocessedGroupElement,
+  ) -> Self {
     CommitmentGens {
       gens: G::from_label(label, n.next_power_of_two()),
       h: h.clone(),
@@ -254,7 +257,6 @@ macro_rules! define_sub_variants {
     }
   };
 }
-
 
 macro_rules! define_add_assign_variants {
   (G = $g:path, LHS = $lhs:ty, RHS = $rhs:ty) => {

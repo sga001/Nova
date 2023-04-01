@@ -553,7 +553,7 @@ where
     res_l_primary?;
     res_r_secondary?;
     res_l_secondary?;
-    
+
     Ok((self.zi_primary.clone(), self.zi_secondary.clone()))
   }
 }
@@ -749,7 +749,6 @@ where
       return Err(NovaError::ProofVerifyError);
     }
 
-    
     // fold the running instance and last instance to get a folded instance
     let f_U_primary = self.nifs_primary.verify(
       &pp.ro_consts_primary,

@@ -1,30 +1,29 @@
 //! This module implements RelaxedR1CSSNARKTrait using Spartan that is generic
 //! over the polynomial commitment and evaluation argument (i.e., a PCS)
+mod nizk;
 pub mod polynomial;
 mod sumcheck;
-mod nizk;
 
 use crate::{
   errors::NovaError,
   r1cs::{R1CSGens, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{
-    commitment::{CommitmentGensTrait, CommitmentEngineTrait, CommitmentTrait},
+    commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait},
     evaluation::{EvaluationEngineTrait, GetGeneratorsTrait},
     snark::{ProverKeyTrait, RelaxedR1CSSNARKTrait, VerifierKeyTrait},
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
-  CommitmentGens,
-  CompressedCommitment,
+  CommitmentGens, CompressedCommitment,
 };
 use ff::Field;
 use itertools::concat;
 use merlin::Transcript;
+use nizk::{EqualityProof, KnowledgeProof, ProductProof};
 use polynomial::{EqPolynomial, MultilinearPolynomial, SparsePolynomial};
+use rand::rngs::OsRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sumcheck::ZKSumcheckProof;
-use nizk::{EqualityProof, KnowledgeProof, ProductProof};
-use rand::rngs::OsRng;
 
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -96,7 +95,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> VerifierKeyTrait<G>
 pub struct RelaxedR1CSSNARK<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
   sc_proof_outer: ZKSumcheckProof<G>,
   claims_outer: (
-    CompressedCommitment<G>, 
+    CompressedCommitment<G>,
     CompressedCommitment<G>,
     CompressedCommitment<G>,
     CompressedCommitment<G>,
@@ -167,26 +166,28 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
        poly_D_comp: &G::Scalar|
        -> G::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
 
-    let (sc_proof_outer, r_x, _claims_outer, blind_claim_outer) = ZKSumcheckProof::prove_cubic_with_additive_term(
-      &G::Scalar::zero(), // claim is zero
-      &G::Scalar::zero(), // blind for claim is also zero
-      num_rounds_x,
-      &mut poly_tau,
-      &mut poly_Az,
-      &mut poly_Bz,
-      &mut poly_uCz_E,
-      comb_func_outer,
-      &pk.sumcheck_gens.gens_1,
-      &pk.sumcheck_gens.gens_4,
-      &mut transcript,
-    )?;
+    let (sc_proof_outer, r_x, _claims_outer, blind_claim_outer) =
+      ZKSumcheckProof::prove_cubic_with_additive_term(
+        &G::Scalar::zero(), // claim is zero
+        &G::Scalar::zero(), // blind for claim is also zero
+        num_rounds_x,
+        &mut poly_tau,
+        &mut poly_Az,
+        &mut poly_Bz,
+        &mut poly_uCz_E,
+        comb_func_outer,
+        &pk.sumcheck_gens.gens_1,
+        &pk.sumcheck_gens.gens_4,
+        &mut transcript,
+      )?;
 
     assert_eq!(poly_tau.len(), 1);
     assert_eq!(poly_Az.len(), 1);
     assert_eq!(poly_Bz.len(), 1);
     assert_eq!(poly_Cz.len(), 1);
 
-    let (tau_claim, Az_claim, Bz_claim, Cz_claim) = (&poly_tau[0], &poly_Az[0], &poly_Bz[0], &poly_Cz[0]);
+    let (tau_claim, Az_claim, Bz_claim, Cz_claim) =
+      (&poly_tau[0], &poly_Az[0], &poly_Bz[0], &poly_Cz[0]);
     let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
       G::Scalar::random(&mut OsRng),
       G::Scalar::random(&mut OsRng),
@@ -235,7 +236,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &claim_post_outer,
       &blind_claim_outer,
     )?;
-
 
     // Combine the three claims into a single claim
     let r_A = G::Scalar::challenge(b"challenge_rA", &mut transcript);
@@ -304,17 +304,18 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       *poly_A_comp * *poly_B_comp
     };
 
-    let (sc_proof_inner, r_y, claims_inner, blind_claim_postsc_inner) = ZKSumcheckProof::prove_quad(
-      &claim_inner_joint,
-      &blind_claim_inner_joint,
-      num_rounds_y,
-      &mut MultilinearPolynomial::new(poly_ABC),
-      &mut MultilinearPolynomial::new(poly_z),
-      comb_func,
-      &pk.sumcheck_gens.gens_1,
-      &pk.sumcheck_gens.gens_3,
-      &mut transcript,
-    )?;
+    let (sc_proof_inner, r_y, claims_inner, blind_claim_postsc_inner) =
+      ZKSumcheckProof::prove_quad(
+        &claim_inner_joint,
+        &blind_claim_inner_joint,
+        num_rounds_y,
+        &mut MultilinearPolynomial::new(poly_ABC),
+        &mut MultilinearPolynomial::new(poly_z),
+        comb_func,
+        &pk.sumcheck_gens.gens_1,
+        &pk.sumcheck_gens.gens_3,
+        &mut transcript,
+      )?;
 
     // prove the final step of inner sumcheck
     let blind_eval_Z_at_ry = (G::Scalar::one() - r_y[0]) * W.r_W.clone();
@@ -337,23 +338,22 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     eval_W.append_to_transcript(b"eval_W", &mut transcript);
 
     let eval_arg = EE::prove_batch(
-      &pk.gens,                  
+      &pk.gens,
       &mut transcript,
-      &[U.comm_E, U.comm_W],             // commitment to x_vec in Hyrax
-      &[W.E.clone(), W.W.clone()],       // x_vec in Hyrax
-      &[W.r_E.clone(), W.r_W.clone()],   // decommitment to x_vec
+      &[U.comm_E, U.comm_W],           // commitment to x_vec in Hyrax
+      &[W.E.clone(), W.W.clone()],     // x_vec in Hyrax
+      &[W.r_E.clone(), W.r_W.clone()], // decommitment to x_vec
       &[r_x, r_y[1..].to_vec()],
-      &[eval_E, eval_W],                 // y_vec in Hyrax
+      &[eval_E, eval_W], // y_vec in Hyrax
     )?;
-
 
     Ok(RelaxedR1CSSNARK {
       sc_proof_outer,
       claims_outer: (
-        comm_Az_claim, 
-        comm_Bz_claim, 
+        comm_Az_claim,
+        comm_Bz_claim,
         comm_Cz_claim,
-        comm_prod_Az_Bz_claims
+        comm_prod_Az_Bz_claims,
       ),
       sc_proof_inner,
       pok_claims_inner: (pok_Cz_claim, proof_prod),
@@ -381,18 +381,22 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       .map(|_i| G::Scalar::challenge(b"challenge_tau", &mut transcript))
       .collect::<Vec<G::Scalar>>();
 
-
-    let claim_outer_comm = G::CE::commit(&vk.sumcheck_gens.gens_1, &[G::Scalar::zero()], &G::Scalar::zero()).compress();
+    let claim_outer_comm = G::CE::commit(
+      &vk.sumcheck_gens.gens_1,
+      &[G::Scalar::zero()],
+      &G::Scalar::zero(),
+    )
+    .compress();
 
     //TODO: use claim_outer_final
-    let (_claim_outer_final, r_x) =
-      self
-        .sc_proof_outer
-        .verify(&claim_outer_comm, num_rounds_x, 
-          3, 
-          &vk.sumcheck_gens.gens_1, 
-          &vk.sumcheck_gens.gens_4,
-          &mut transcript)?;
+    let (_claim_outer_final, r_x) = self.sc_proof_outer.verify(
+      &claim_outer_comm,
+      num_rounds_x,
+      3,
+      &vk.sumcheck_gens.gens_1,
+      &vk.sumcheck_gens.gens_4,
+      &mut transcript,
+    )?;
 
     // verify claim_outer_final
     let (claim_Az, claim_Bz, claim_Cz) = self.claims_outer;
@@ -484,7 +488,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
 
     //TODO: Need to add this back. It requires changing things a bit. Potentially need to send more
     //commitments or something. Not clear actually.
-    
+
     EE::verify_batch(
       &vk.gens,
       &mut transcript,
@@ -492,7 +496,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &[r_x, r_y[1..].to_vec()],
       &self.eval_arg,
     )?;
-    
 
     Ok(())
   }

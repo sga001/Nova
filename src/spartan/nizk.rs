@@ -2,13 +2,16 @@
 #![allow(clippy::type_complexity)]
 use crate::errors::NovaError;
 use crate::traits::{
-  commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait},  
-  AppendToTranscriptTrait, ChallengeTrait, Group};
+  commitment::{
+    CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait,
+  },
+  AppendToTranscriptTrait, ChallengeTrait, Group,
+};
 use crate::{CommitmentGens, CompressedCommitment, CE};
 use ff::Field;
 use merlin::Transcript;
-use serde::{Deserialize, Serialize};
 use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -18,14 +21,12 @@ pub struct KnowledgeProof<G: Group> {
   z2: G::Scalar,
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct EqualityProof<G: Group> {
   alpha: CompressedCommitment<G>,
   z: G::Scalar,
 }
-
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -36,7 +37,6 @@ pub struct ProductProof<G: Group> {
   z: [G::Scalar; 5],
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct DotProductProof<G: Group> {
@@ -46,7 +46,6 @@ pub struct DotProductProof<G: Group> {
   z_delta: G::Scalar,
   z_beta: G::Scalar,
 }
-
 
 impl<G: Group> KnowledgeProof<G> {
   fn protocol_name() -> &'static [u8] {
@@ -64,7 +63,6 @@ impl<G: Group> KnowledgeProof<G> {
     // produce two random scalars
     let t1 = G::Scalar::random(&mut OsRng);
     let t2 = G::Scalar::random(&mut OsRng);
-
 
     let C = G::CE::commit(gens_n, &[x.clone()], r).compress();
     C.append_to_transcript(b"C", transcript);
@@ -103,7 +101,6 @@ impl<G: Group> KnowledgeProof<G> {
   }
 }
 
-
 impl<G: Group> EqualityProof<G> {
   fn protocol_name() -> &'static [u8] {
     b"equality proof"
@@ -116,7 +113,14 @@ impl<G: Group> EqualityProof<G> {
     s1: &G::Scalar,
     v2: &G::Scalar,
     s2: &G::Scalar,
-  ) -> Result<(EqualityProof<G>, CompressedCommitment<G>, CompressedCommitment<G>), NovaError> {
+  ) -> Result<
+    (
+      EqualityProof<G>,
+      CompressedCommitment<G>,
+      CompressedCommitment<G>,
+    ),
+    NovaError,
+  > {
     transcript.append_message(b"protocol-name", EqualityProof::<G>::protocol_name());
 
     // produce a random scalar
@@ -128,8 +132,8 @@ impl<G: Group> EqualityProof<G> {
     let C2 = G::CE::commit(gens_n, &[v2.clone()], s2).compress();
     C2.append_to_transcript(b"C2", transcript);
 
-    let alpha = G::CE::commit(gens_n, &[G::Scalar::zero()], &r).compress(); // h^r 
-    alpha.append_to_transcript(b"alpha", transcript);                                                                         
+    let alpha = G::CE::commit(gens_n, &[G::Scalar::zero()], &r).compress(); // h^r
+    alpha.append_to_transcript(b"alpha", transcript);
 
     let c = G::Scalar::challenge(b"c", transcript);
 
@@ -156,7 +160,6 @@ impl<G: Group> EqualityProof<G> {
       (C * c + self.alpha.decompress()?).compress()
     };
 
-
     let lhs = G::CE::commit(gens_n, &[G::Scalar::zero()], &self.z).compress(); // h^z
 
     if lhs == rhs {
@@ -166,7 +169,6 @@ impl<G: Group> EqualityProof<G> {
     }
   }
 }
-
 
 impl<G: Group> ProductProof<G> {
   fn protocol_name() -> &'static [u8] {
@@ -182,7 +184,15 @@ impl<G: Group> ProductProof<G> {
     rY: &G::Scalar,
     z: &G::Scalar,
     rZ: &G::Scalar,
-  ) -> Result<(ProductProof<G>, CompressedCommitment<G>, CompressedCommitment<G>, CompressedCommitment<G>), NovaError> {
+  ) -> Result<
+    (
+      ProductProof<G>,
+      CompressedCommitment<G>,
+      CompressedCommitment<G>,
+      CompressedCommitment<G>,
+    ),
+    NovaError,
+  > {
     transcript.append_message(b"protocol-name", ProductProof::<G>::protocol_name());
 
     // produce 5 random scalars
@@ -209,7 +219,7 @@ impl<G: Group> ProductProof<G> {
 
     let delta = {
       let h_to_b5 = G::CE::commit(gens_n, &[G::Scalar::zero()], &b5); // h^b5
-      (X.decompress()? * b3 + h_to_b5).compress()  // X^b3*h^b5
+      (X.decompress()? * b3 + h_to_b5).compress() // X^b3*h^b5
     };
 
     delta.append_to_transcript(b"delta", transcript);
@@ -223,7 +233,8 @@ impl<G: Group> ProductProof<G> {
     let z5 = b5 + c * (*rZ - *rX * *y);
     let z = [z1, z2, z3, z4, z5];
 
-    Ok(( Self {
+    Ok((
+      Self {
         alpha,
         beta,
         delta,
@@ -272,7 +283,6 @@ impl<G: Group> ProductProof<G> {
     let z4 = self.z[3];
     let z5 = self.z[4];
 
-
     let c = G::Scalar::challenge(b"c", transcript);
 
     let res = ProductProof::<G>::check_equality(&self.alpha, X, &c, gens_n, &z1, &z2)?
@@ -282,10 +292,9 @@ impl<G: Group> ProductProof<G> {
       let lhs = (self.delta.decompress()? + Z.decompress()? * c).compress();
 
       let h_to_z5 = G::CE::commit(gens_n, &[G::Scalar::zero()], &z5); // h^z5
-      let rhs = (X.decompress()? * z3 + h_to_z5).compress();  // X^z3*h^z5
+      let rhs = (X.decompress()? * z3 + h_to_z5).compress(); // X^z3*h^z5
       lhs == rhs
     };
-
 
     if res && res2 {
       Ok(())
@@ -295,13 +304,7 @@ impl<G: Group> ProductProof<G> {
   }
 }
 
-
-
-
-
-
 impl<G: Group> DotProductProof<G> {
-
   pub fn protocol_name() -> &'static [u8] {
     b"dot product proof"
   }
@@ -336,9 +339,8 @@ impl<G: Group> DotProductProof<G> {
 
     // produce randomness for the proofs
     let d_vec = (0..n)
-        .map(|_i| G::Scalar::random(&mut OsRng))
-        .collect::<Vec<G::Scalar>>();
-
+      .map(|_i| G::Scalar::random(&mut OsRng))
+      .collect::<Vec<G::Scalar>>();
 
     let r_delta = G::Scalar::random(&mut OsRng);
     let r_beta = G::Scalar::random(&mut OsRng);
@@ -381,7 +383,6 @@ impl<G: Group> DotProductProof<G> {
     )
   }
 
-
   pub fn verify(
     &self,
     gens_1: &CommitmentGens<G>, // generator of size 1
@@ -390,8 +391,8 @@ impl<G: Group> DotProductProof<G> {
     a_vec: &[G::Scalar],
     Cx: &CompressedCommitment<G>,
     Cy: &CompressedCommitment<G>,
-  )-> Result<(), NovaError> {
-    assert_eq!(gens_n.len(), a_vec.len());  
+  ) -> Result<(), NovaError> {
+    assert_eq!(gens_n.len(), a_vec.len());
     assert_eq!(gens_1.len(), 1);
 
     transcript.append_message(b"protocol-name", DotProductProof::<G>::protocol_name());
@@ -404,9 +405,8 @@ impl<G: Group> DotProductProof<G> {
 
     let c = G::Scalar::challenge(b"c", transcript);
 
-    let mut result = 
-      Cx.decompress()? * c  + self.delta.decompress()? == 
-      CE::<G>::commit(gens_n, &self.z, &self.z_delta);
+    let mut result = Cx.decompress()? * c + self.delta.decompress()?
+      == CE::<G>::commit(gens_n, &self.z, &self.z_delta);
 
     let dotproduct_z_a = DotProductProof::<G>::compute_dotproduct(&self.z, a_vec);
     result &= Cy.decompress()? * c + self.beta.decompress()?

@@ -56,7 +56,7 @@ impl<G: Group> NIFS<G> {
     U2.absorb_in_ro(&mut ro);
 
     // compute a commitment to the cross-term
-    let r_T = G::Scalar::random(&mut OsRng); 
+    let r_T = G::Scalar::random(&mut OsRng);
     let (T, comm_T) = S.commit_T(gens, U1, W1, U2, W2, &r_T)?;
 
     // append `comm_T` to the transcript and obtain a challenge
@@ -70,8 +70,6 @@ impl<G: Group> NIFS<G> {
 
     // fold the witness using `r` and `T`
     let W = W1.fold(W2, &T, &r_T, &r)?;
-
-
 
     // return the folded instance and witness
     Ok((

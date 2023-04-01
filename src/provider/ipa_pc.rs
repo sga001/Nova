@@ -5,7 +5,9 @@ use crate::{
   provider::pedersen::CommitmentGensExtTrait,
   spartan::polynomial::EqPolynomial,
   traits::{
-    commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait},
+    commitment::{
+      CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait,
+    },
     evaluation::{EvaluationEngineTrait, GetGeneratorsTrait},
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
@@ -27,8 +29,7 @@ pub struct EvaluationGens<G: Group> {
   gens_s: CommitmentGens<G>, // This is a generator for scalars
 }
 
-
-impl<G: Group> GetGeneratorsTrait<G> for EvaluationGens<G>{
+impl<G: Group> GetGeneratorsTrait<G> for EvaluationGens<G> {
   fn get_scalar_gen(&self) -> CommitmentGens<G> {
     self.gens_s.clone()
   }
@@ -127,18 +128,21 @@ where
     let ipa =
       InnerProductArgument::prove(&gens.gens_v, &gens.gens_s, &U_folded, &W_folded, transcript)?;
 
-    Ok(EvaluationArgument { nifs, ipa, eval_commitments: comms_y_vec })
+    Ok(EvaluationArgument {
+      nifs,
+      ipa,
+      eval_commitments: comms_y_vec,
+    })
   }
 
   /// A method to verify purported evaluations of a batch of polynomials
   fn verify_batch(
     gens: &Self::EvaluationGens,
     transcript: &mut Transcript,
-    comms_x_vec: &[Commitment<G>],      
+    comms_x_vec: &[Commitment<G>],
     points: &[Vec<G::Scalar>],
     arg: &Self::EvaluationArgument,
   ) -> Result<(), NovaError> {
-
     let comms_y_vec = &arg.eval_commitments;
 
     // sanity checks (these should never fail)
@@ -414,13 +418,13 @@ where
     transcript: &mut Transcript,
   ) -> Result<
     (
-      G::Scalar,               // r_P'
-      Commitment<G>,           // P_L
-      Commitment<G>,           // P_R
-      G::Scalar,               // y_prime
-      Vec<G::Scalar>,          // x_vec'
-      Vec<G::Scalar>,          // a_vec'
-      CommitmentGens<G>,       // gens'
+      G::Scalar,         // r_P'
+      Commitment<G>,     // P_L
+      Commitment<G>,     // P_R
+      G::Scalar,         // y_prime
+      Vec<G::Scalar>,    // x_vec'
+      Vec<G::Scalar>,    // a_vec'
+      CommitmentGens<G>, // gens'
     ),
     NovaError,
   > {
@@ -452,7 +456,6 @@ where
         .collect::<Vec<G::Scalar>>(),
       &r_R,
     );
-
 
     P_L.append_to_transcript(b"L", transcript);
     P_R.append_to_transcript(b"R", transcript);
@@ -501,13 +504,12 @@ where
     transcript: &mut Transcript,
   ) -> Result<
     (
-      Commitment<G>,           // P'
-      Vec<G::Scalar>,          // a_vec'
-      CommitmentGens<G>,       // gens'
+      Commitment<G>,     // P'
+      Vec<G::Scalar>,    // a_vec'
+      CommitmentGens<G>, // gens'
     ),
     NovaError,
   > {
-
     let n = a_vec.len();
 
     P_L.append_to_transcript(b"L", transcript);
@@ -515,8 +517,7 @@ where
 
     let chal = G::Scalar::challenge(b"challenge_r", transcript);
 
-
-//    println!("Challenge in bullet_reduce_verifier {:?}", chal);
+    //    println!("Challenge in bullet_reduce_verifier {:?}", chal);
 
     let chal_square = chal * chal;
     let chal_inverse = chal.invert().unwrap();
@@ -568,7 +569,7 @@ where
     //
     // gens                     vec<g_i>
     // gens_y                   g
-    
+
     transcript.append_message(b"protocol-name", Self::protocol_name());
 
     if U.a_vec.len() != W.x_vec.len() {
@@ -579,7 +580,7 @@ where
     U.a_vec.append_to_transcript(b"a_vec", transcript);
     U.comm_y.append_to_transcript(b"y", transcript);
 
-    // Scale generator to be consistent with Bulletproofs Figure 1 (in the Bulletproofs 
+    // Scale generator to be consistent with Bulletproofs Figure 1 (in the Bulletproofs
     // figure, gens_y is "u" and chal is "x").
     let chal = G::Scalar::challenge(b"r", transcript);
     let gens_y = gens_y.scale(&chal);
@@ -631,10 +632,9 @@ where
     delta.append_to_transcript(b"delta", transcript);
 
     let chal = G::Scalar::challenge(b"chal_z", transcript);
-    
+
     let z_1 = d + chal * y_hat;
     let z_2 = a_hat * ((chal * r_P_hat) + r_beta) + r_delta;
-
 
     Ok(InnerProductArgument {
       P_L_vec,
@@ -681,14 +681,8 @@ where
       let P_L = self.P_L_vec[i].decompress().unwrap();
       let P_R = self.P_R_vec[i].decompress().unwrap();
 
-      let (P_prime, a_vec_prime, gens_prime) = Self::bullet_reduce_verifier(
-        &P,
-        &P_L,
-        &P_R,
-        &a_vec,
-        &gens,
-        transcript,
-      )?;
+      let (P_prime, a_vec_prime, gens_prime) =
+        Self::bullet_reduce_verifier(&P, &P_L, &P_R, &a_vec, &gens, transcript)?;
 
       P = P_prime;
       a_vec = a_vec_prime;
@@ -708,7 +702,7 @@ where
     let g_hat = CE::<G>::commit(&gens, &[G::Scalar::one()], &G::Scalar::zero());
     let g_to_a = CE::<G>::commit(&gens_y, &a_vec, &G::Scalar::zero()); // g^a*h^0 = g^a
     let h_to_z2 = CE::<G>::commit(&gens_y, &[G::Scalar::zero()], &self.z_2); // g^0 * h^z2 = h^z2
-                                                                        
+
     let g_hat_plus_g_to_a = g_hat + g_to_a;
     let val_to_z1 = g_hat_plus_g_to_a * self.z_1;
     let right_hand_side = val_to_z1 + h_to_z2;

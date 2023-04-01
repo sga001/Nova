@@ -219,7 +219,6 @@ impl<G: Group> R1CSShape<G> {
       U.comm_W == comm_W && U.comm_E == comm_E
     };
 
-
     if res_eq && res_comm {
       Ok(())
     } else {
