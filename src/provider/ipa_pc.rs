@@ -29,11 +29,8 @@ pub struct EvaluationGens<G: Group> {
 
 
 impl<G: Group> GetGeneratorsTrait<G> for EvaluationGens<G>{
-  fn get_gens(&self) -> Vec<CommitmentGens<G>> {
-    let mut v = Vec::new();
-    v.push(self.gens_v.clone());
-    v.push(self.gens_s.clone());
-    v
+  fn get_scalar_gen(&self) -> CommitmentGens<G> {
+    self.gens_s.clone()
   }
 }
 

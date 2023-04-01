@@ -321,10 +321,8 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let blind_expected_claim_post_inner = claims_inner[1] * blind_eval_Z_at_ry;
     let claim_post_inner = claims_inner[0] * claims_inner[1];
 
-    let pc_gens = &pk.gens.get_gens()[1];
-
     let (proof_eq_sc_inner, _C1, _C2) = EqualityProof::prove(
-      pc_gens,
+      &pk.gens.get_scalar_gen(),
       &mut transcript,
       &claim_post_inner,
       &blind_expected_claim_post_inner,
@@ -367,16 +365,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
 
   /// verifies a proof of satisfiability of a RelaxedR1CS instance
   fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<G>) -> Result<(), NovaError> {
-
-    //TODO: From spartan's repo:
-    // 1. Commit to Az, Bz, Cz
-    // 2. Prove via knowledge proof the relation between those commitents
-    // 3. Add commitments to transcript and make sure that prover is not adding plaintext values to
-    //    transcript
-    // 4. Verify the knowledge proof in the verifier, which requires only commitments
-    //    This is instead of the outer_proof_expected stuff
-    // 5. Prove via equality proof the inner_sumcheck stuff.
-
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
 
     // append the R1CSShape and RelaxedR1CSInstance to the transcript

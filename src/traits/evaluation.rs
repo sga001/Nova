@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// A trait that returns the generators
 pub trait GetGeneratorsTrait<G: Group> {
   /// Return the generators
-  fn get_gens(&self) -> Vec<<G::CE as CommitmentEngineTrait<G>>::CommitmentGens>;
+  fn get_scalar_gen(&self) -> <G::CE as CommitmentEngineTrait<G>>::CommitmentGens;
 }
 
 /// A trait that ties different pieces of the commitment evaluation together
