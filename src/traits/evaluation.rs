@@ -8,6 +8,12 @@ use crate::{
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
+/// A trait that returns the generators
+pub trait GetGeneratorsTrait<G: Group> {
+  /// Return the generators
+  fn get_gens(&self) -> Vec<<G::CE as CommitmentEngineTrait<G>>::CommitmentGens>;
+}
+
 /// A trait that ties different pieces of the commitment evaluation together
 pub trait EvaluationEngineTrait<G: Group>:
   Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>
@@ -16,7 +22,7 @@ pub trait EvaluationEngineTrait<G: Group>:
   type CE: CommitmentEngineTrait<G>;
 
   /// A type that holds generators
-  type EvaluationGens: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;
+  type EvaluationGens: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + GetGeneratorsTrait<G>;
 
   /// A type that holds the evaluation argument
   type EvaluationArgument: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;

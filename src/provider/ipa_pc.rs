@@ -6,7 +6,7 @@ use crate::{
   spartan::polynomial::EqPolynomial,
   traits::{
     commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait},
-    evaluation::EvaluationEngineTrait,
+    evaluation::{EvaluationEngineTrait, GetGeneratorsTrait},
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
   Commitment, CommitmentGens, CompressedCommitment, CE,
@@ -25,6 +25,16 @@ use std::marker::PhantomData;
 pub struct EvaluationGens<G: Group> {
   gens_v: CommitmentGens<G>, // This is a generator for vectors
   gens_s: CommitmentGens<G>, // This is a generator for scalars
+}
+
+
+impl<G: Group> GetGeneratorsTrait<G> for EvaluationGens<G>{
+  fn get_gens(&self) -> Vec<CommitmentGens<G>> {
+    let mut v = Vec::new();
+    v.push(self.gens_v.clone());
+    v.push(self.gens_s.clone());
+    v
+  }
 }
 
 /// Provides an implementation of a polynomial evaluation argument
