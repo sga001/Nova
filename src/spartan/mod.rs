@@ -8,8 +8,8 @@ use crate::{
   errors::NovaError,
   r1cs::{R1CSGens, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{
-    commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait},
-    evaluation::{EvaluationEngineTrait, GetGeneratorsTrait},
+    commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait},
+    evaluation::{EvaluationEngineTrait, GetGeneratorsTrait, GetEvalCommitmentsTrait},
     snark::{ProverKeyTrait, RelaxedR1CSSNARKTrait, VerifierKeyTrait},
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
@@ -25,15 +25,20 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sumcheck::ZKSumcheckProof;
 
+///A type that represents generators for commitments used in sumcheck
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct SumcheckGens<G: Group> {
+  /// 1 Generator 
   pub gens_1: CommitmentGens<G>,
+  /// 3 Generators
   pub gens_3: CommitmentGens<G>,
+  /// 4 Generators
   pub gens_4: CommitmentGens<G>,
 }
 
 impl<G: Group> SumcheckGens<G> {
+  /// Creates new generators for sumcheck
   pub fn new(label: &'static [u8]) -> Self {
     let gens_1 = CommitmentGens::<G>::new(label, 1);
     let gens_3 = CommitmentGens::<G>::new(label, 3);
@@ -332,10 +337,10 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     )?;
 
     let eval_E = MultilinearPolynomial::new(W.E.clone()).evaluate(&r_x);
-    eval_E.append_to_transcript(b"eval_E", &mut transcript);
-
     let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
-    eval_W.append_to_transcript(b"eval_W", &mut transcript);
+
+//    eval_E.append_to_transcript(b"eval_E", &mut transcript);
+//    eval_W.append_to_transcript(b"eval_W", &mut transcript);
 
     let eval_arg = EE::prove_batch(
       &pk.gens,
@@ -376,11 +381,14 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       ((vk.S.num_vars as f64).log2() as usize + 1),
     );
 
-    // outer sum-check
+
+    // derive the verifier's challenge tau
     let tau = (0..num_rounds_x)
       .map(|_i| G::Scalar::challenge(b"challenge_tau", &mut transcript))
       .collect::<Vec<G::Scalar>>();
 
+
+    // outer sum-check
     let claim_outer_comm = G::CE::commit(
       &vk.sumcheck_gens.gens_1,
       &[G::Scalar::zero()],
@@ -388,8 +396,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     )
     .compress();
 
-    //TODO: use claim_outer_final
-    let (_claim_outer_final, r_x) = self.sc_proof_outer.verify(
+    let (comm_claim_post_outer, r_x) = self.sc_proof_outer.verify(
       &claim_outer_comm,
       num_rounds_x,
       3,
@@ -398,49 +405,65 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &mut transcript,
     )?;
 
-    // verify claim_outer_final
-    let (claim_Az, claim_Bz, claim_Cz) = self.claims_outer;
+
+    // perform the intermediate sum-check test with claimed Az, Bz, and Cz
+    let (comm_Az_claim, comm_Bz_claim, comm_Cz_claim, comm_prod_Az_Bz_claims) = &self.claims_outer;
+    let (pok_Cz_claim, proof_prod) = &self.pok_claims_inner;
+
+
+    pok_Cz_claim.verify(&vk.sumcheck_gens.gens_1, &mut transcript, comm_Cz_claim)?;
+    proof_prod.verify(
+      &vk.sumcheck_gens.gens_1,
+      &mut transcript,
+      comm_Az_claim,
+      comm_Bz_claim,
+      comm_prod_Az_Bz_claims,
+    )?;
+
     let taus_bound_rx = EqPolynomial::new(tau).evaluate(&r_x);
 
-    //TODO: bring this back
-    /*
-    let claim_outer_final_expected =
-      taus_bound_rx * (claim_Az * claim_Bz - U.u * claim_Cz - self.eval_E); // TODO
+    let expected_claim_post_outer = (
+      (comm_prod_Az_Bz_claims.decompress()? - comm_Cz_claim.decompress()?) * taus_bound_rx
+    ).compress();
 
-    if claim_outer_final != claim_outer_final_expected {
-      return Err(NovaError::InvalidSumcheckProof);
-    }
-    */
 
-    self
-      .claims_outer
-      .0
-      .append_to_transcript(b"claim_Az", &mut transcript);
-    self
-      .claims_outer
-      .1
-      .append_to_transcript(b"claim_Bz", &mut transcript);
-    self
-      .claims_outer
-      .2
-      .append_to_transcript(b"claim_Cz", &mut transcript);
-    self.eval_E.append_to_transcript(b"eval_E", &mut transcript);
+    // verify proof that expected_claim_post_outer == claim_post_outer
+    self.proof_eq_sc_outer.verify(
+      &vk.sumcheck_gens.gens_1,
+      &mut transcript,
+      &expected_claim_post_outer,
+      &comm_claim_post_outer,
+    )?;
+
 
     // inner sum-check
+    
+    // derive three public challenges and then derive a joint claim
     let r_A = G::Scalar::challenge(b"challenge_rA", &mut transcript);
     let r_B = G::Scalar::challenge(b"challenge_rB", &mut transcript);
     let r_C = G::Scalar::challenge(b"challenge_rC", &mut transcript);
+ 
 
-    let claim_inner_joint =
-      r_A * self.claims_outer.0 + r_B * self.claims_outer.1 + r_C * self.claims_outer.2;
+    // r_A * comm_Az_claim + r_B * comm_Bz_claim + r_C * comm_Cz_claim;
+    let comm_claim_inner = (comm_Az_claim.decompress()? * r_A + 
+      comm_Bz_claim.decompress()? * r_B + 
+      comm_Cz_claim.decompress()? * r_C).compress();
+    
+    // verify the joint claim with a sum-check protocol
+    let (comm_claim_post_inner, r_y) = self.sc_proof_inner.verify(
+      &comm_claim_inner,
+      num_rounds_y,
+      2,
+      &vk.sumcheck_gens.gens_1,
+      &vk.sumcheck_gens.gens_3,
+      &mut transcript
+    )?;
 
-    let (claim_inner_final, r_y) =
-      self
-        .sc_proof_inner
-        .verify(claim_inner_joint, num_rounds_y, 2, &mut transcript)?;
 
+    let comm_eval_W = self.eval_arg.get_eval_commitment(1);
+    
     // verify claim_inner_final
-    let eval_Z = {
+    let comm_eval_Z = {
       let eval_X = {
         // constant term
         let mut poly_X = vec![(0, U.u)];
@@ -452,8 +475,13 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
         );
         SparsePolynomial::new((vk.S.num_vars as f64).log2() as usize, poly_X).evaluate(&r_y[1..])
       };
-      (G::Scalar::one() - r_y[0]) * self.eval_W + r_y[0] * eval_X
+      
+      comm_eval_W * (G::Scalar::one() - r_y[0]) +
+        G::CE::commit(&vk.gens.get_scalar_gen(), &[eval_X], &G::Scalar::zero()) * r_y[0]
     };
+
+
+    // perform the final check in the second sum-check protocol
 
     let evaluate_as_sparse_polynomial = |S: &R1CSShape<G>,
                                          r_x: &[G::Scalar],
@@ -478,17 +506,19 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     };
 
     let (eval_A_r, eval_B_r, eval_C_r) = evaluate_as_sparse_polynomial(&vk.S, &r_x, &r_y);
-    let claim_inner_final_expected = (r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r) * eval_Z;
-    if claim_inner_final != claim_inner_final_expected {
-      return Err(NovaError::InvalidSumcheckProof);
-    }
+
+    let claim_inner_final_expected = (comm_eval_Z * 
+      (r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r)).compress();
+
+    // verify proof that claim_inner_final_expected == claim_post_inner
+    self.proof_eq_sc_inner.verify(
+      &vk.sumcheck_gens.gens_1,
+      &mut transcript,
+      &claim_inner_final_expected,
+      &comm_claim_post_inner,
+    )?;
 
     // verify eval_W and eval_E
-    self.eval_W.append_to_transcript(b"eval_W", &mut transcript); //eval_E is already in the transcript
-
-    //TODO: Need to add this back. It requires changing things a bit. Potentially need to send more
-    //commitments or something. Not clear actually.
-
     EE::verify_batch(
       &vk.gens,
       &mut transcript,
@@ -496,6 +526,8 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &[r_x, r_y[1..].to_vec()],
       &self.eval_arg,
     )?;
+
+
 
     Ok(())
   }

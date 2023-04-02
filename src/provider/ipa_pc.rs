@@ -8,7 +8,7 @@ use crate::{
     commitment::{
       CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait,
     },
-    evaluation::{EvaluationEngineTrait, GetGeneratorsTrait},
+    evaluation::{EvaluationEngineTrait, GetGeneratorsTrait, GetEvalCommitmentsTrait},
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
   Commitment, CommitmentGens, CompressedCommitment, CE,
@@ -35,6 +35,7 @@ impl<G: Group> GetGeneratorsTrait<G> for EvaluationGens<G> {
   }
 }
 
+
 /// Provides an implementation of a polynomial evaluation argument
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -42,6 +43,14 @@ pub struct EvaluationArgument<G: Group> {
   nifs: Vec<NIFSForInnerProduct<G>>,
   ipa: InnerProductArgument<G>,
   eval_commitments: Vec<Commitment<G>>,
+}
+
+
+impl<G: Group> GetEvalCommitmentsTrait<G> for EvaluationArgument<G> {
+  fn get_eval_commitment(&self, index: usize) -> Commitment<G> {
+    assert!(self.eval_commitments.len() > index);
+    self.eval_commitments[index].clone()
+  }
 }
 
 /// Provides an implementation of a polynomial evaluation engine using IPA

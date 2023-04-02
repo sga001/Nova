@@ -8,6 +8,12 @@ use crate::{
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
+/// A trait that returns commitment of an evaluation argument
+pub trait GetEvalCommitmentsTrait<G: Group> {
+  /// Returns the commitment at index
+  fn get_eval_commitment(&self, index: usize) -> <G::CE as CommitmentEngineTrait<G>>::Commitment;
+}
+
 /// A trait that returns the generators
 pub trait GetGeneratorsTrait<G: Group> {
   /// Return the generators
@@ -30,7 +36,8 @@ pub trait EvaluationEngineTrait<G: Group>:
     + GetGeneratorsTrait<G>;
 
   /// A type that holds the evaluation argument
-  type EvaluationArgument: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>;
+  type EvaluationArgument: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> +
+    GetEvalCommitmentsTrait<G>;
 
   /// A method to perform any additional setup needed to produce proofs of evaluations
   fn setup(gens: &<Self::CE as CommitmentEngineTrait<G>>::CommitmentGens) -> Self::EvaluationGens;
