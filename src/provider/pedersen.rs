@@ -57,6 +57,19 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
     }
   }
 
+  fn new_exact(label: &'static [u8], n: usize) -> Self {
+    let mut blinding_label = label.to_vec();
+    blinding_label.extend(b"blinding factor");
+    let blinding = G::from_label(&blinding_label, 1);
+    let h = blinding.first().unwrap().clone();
+
+    CommitmentGens {
+      gens: G::from_label(label, n),
+      h,
+      _p: Default::default(),
+    }
+  }
+
   fn new_with_blinding_gen(
     label: &'static [u8],
     n: usize,

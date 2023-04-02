@@ -40,9 +40,9 @@ pub struct SumcheckGens<G: Group> {
 impl<G: Group> SumcheckGens<G> {
   /// Creates new generators for sumcheck
   pub fn new(label: &'static [u8]) -> Self {
-    let gens_1 = CommitmentGens::<G>::new(label, 1);
-    let gens_3 = CommitmentGens::<G>::new(label, 3);
-    let gens_4 = CommitmentGens::<G>::new(label, 4);
+    let gens_1 = CommitmentGens::<G>::new_exact(label, 1);
+    let gens_3 = CommitmentGens::<G>::new_exact(label, 3);
+    let gens_4 = CommitmentGens::<G>::new_exact(label, 4);
 
     Self {
       gens_1,
@@ -189,7 +189,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     assert_eq!(poly_tau.len(), 1);
     assert_eq!(poly_Az.len(), 1);
     assert_eq!(poly_Bz.len(), 1);
-    assert_eq!(poly_Cz.len(), 1);
+    assert_eq!(poly_uCz_E.len(), 1);
 
     let (tau_claim, Az_claim, Bz_claim, Cz_claim) =
       (&poly_tau[0], &poly_Az[0], &poly_Bz[0], &poly_Cz[0]);
