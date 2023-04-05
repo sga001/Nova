@@ -151,7 +151,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
 
     let mut poly_tau = MultilinearPolynomial::new(EqPolynomial::new(tau).evals());
 
-    let (mut poly_Az, mut poly_Bz, _poly_Cz, mut poly_uCz_E) = {
+    let (mut poly_Az, mut poly_Bz, poly_Cz, mut poly_uCz_E) = {
       let (poly_Az, poly_Bz, poly_Cz) = pk.S.multiply_vec(&z)?;
       let poly_uCz_E = (0..pk.S.num_cons)
         .map(|i| U.u * poly_Cz[i] + W.E[i])
@@ -171,7 +171,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
        poly_D_comp: &G::Scalar|
        -> G::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
 
-    let (sc_proof_outer, r_x, _claims_outer, blind_claim_outer) =
+    let (sc_proof_outer, r_x, _claims_outer, blind_claim_post_outer) =
       ZKSumcheckProof::prove_cubic_with_additive_term(
         &G::Scalar::zero(), // claim is zero
         &G::Scalar::zero(), // blind for claim is also zero
@@ -191,23 +191,25 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     assert_eq!(poly_Bz.len(), 1);
     assert_eq!(poly_uCz_E.len(), 1);
 
-    let (tau_claim, Az_claim, Bz_claim, Cz_E_claim) =
-      //XXX: originally poly_Cz instead of poly_uCz_E
-      (&poly_tau[0], &poly_Az[0], &poly_Bz[0], &poly_uCz_E[0]);
+    let (tau_claim, Az_claim, Bz_claim) =
+      (&poly_tau[0], &poly_Az[0], &poly_Bz[0]);
 
-    let (Az_blind, Bz_blind, Cz_E_blind, prod_Az_Bz_blind) = (
+    let Cz_claim = poly_Cz.evaluate(&r_x);
+
+
+    let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
       G::Scalar::random(&mut OsRng),
       G::Scalar::random(&mut OsRng),
       G::Scalar::random(&mut OsRng),
       G::Scalar::random(&mut OsRng),
     );
 
-    let (pok_Cz_E_claim, comm_Cz_E_claim) = {
+    let (pok_Cz_claim, comm_Cz_claim) = {
       KnowledgeProof::<G>::prove(
         &pk.sumcheck_gens.gens_1,
         &mut transcript,
-        Cz_E_claim,
-        &Cz_E_blind,
+        &Cz_claim,
+        &Cz_blind,
       )
     }?;
 
@@ -228,10 +230,16 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     // prove the final step of sumcheck outer
     let tau_bound_rx = tau_claim;
 
-    //TODO: this is sketchy
+    // Evaluate E at r_x. We do this to compute blind and claim of outer sumcheck
+    let eval_E = MultilinearPolynomial::new(W.E.clone()).evaluate(&r_x);
+    let blind_eval_E = G::Scalar::random(&mut OsRng);
 
-    let blind_expected_claim_outer = *tau_bound_rx * (prod_Az_Bz_blind - Cz_E_blind);
-    let claim_post_outer = (*Az_claim * *Bz_claim - *Cz_E_claim) * *tau_bound_rx;
+    let test_claim = U.u * Cz_claim + eval_E;
+
+    println!("[PROVER] Real claim: {:?} / expected claim: {:?}", &poly_uCz_E[0], test_claim);
+
+    let blind_expected_claim_outer = *tau_bound_rx * (prod_Az_Bz_blind - (U.u * Cz_blind + blind_eval_E));
+    let claim_post_outer = *tau_bound_rx * (*Az_claim * *Bz_claim - (U.u * Cz_claim + eval_E));
 
     let (proof_eq_sc_outer, _C1, _C2) = EqualityProof::<G>::prove(
       &pk.sumcheck_gens.gens_1,
@@ -239,7 +247,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &claim_post_outer,
       &blind_expected_claim_outer,
       &claim_post_outer,
-      &blind_claim_outer,
+      &blind_claim_post_outer,
     )?;
 
     // Combine the three claims into a single claim
@@ -247,8 +255,8 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let r_B = G::Scalar::challenge(b"challenge_rB", &mut transcript);
     let r_C = G::Scalar::challenge(b"challenge_rC", &mut transcript);
 
-    let claim_inner_joint = r_A * Az_claim + r_B * Bz_claim + r_C * Cz_E_claim;
-    let blind_claim_inner_joint = r_A * Az_blind + r_B * Bz_blind + r_C * Cz_E_blind;
+    let claim_inner_joint = r_A * Az_claim + r_B * Bz_claim + r_C * Cz_claim;
+    let blind_claim_inner_joint = r_A * Az_blind + r_B * Bz_blind + r_C * Cz_blind;
 
     let poly_ABC = {
       // compute the initial evaluation table for R(\tau, x)
@@ -336,11 +344,8 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &blind_claim_postsc_inner,
     )?;
 
-    let eval_E = MultilinearPolynomial::new(W.E.clone()).evaluate(&r_x);
     let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
-
-//    eval_E.append_to_transcript(b"eval_E", &mut transcript);
-//    eval_W.append_to_transcript(b"eval_W", &mut transcript);
+    let blind_eval_W = G::Scalar::random(&mut OsRng);
 
     let eval_arg = EE::prove_batch(
       &pk.gens,
@@ -350,6 +355,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &[W.r_E.clone(), W.r_W.clone()], // decommitment to x_vec
       &[r_x, r_y[1..].to_vec()],
       &[eval_E, eval_W], // y_vec in Hyrax
+      &[blind_eval_E, blind_eval_W],
     )?;
 
     Ok(RelaxedR1CSSNARK {
@@ -357,11 +363,11 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       claims_outer: (
         comm_Az_claim,
         comm_Bz_claim,
-        comm_Cz_E_claim,
+        comm_Cz_claim,
         comm_prod_Az_Bz_claims,
       ),
       sc_proof_inner,
-      pok_claims_inner: (pok_Cz_E_claim, proof_prod),
+      pok_claims_inner: (pok_Cz_claim, proof_prod),
       proof_eq_sc_outer,
       proof_eq_sc_inner,
       eval_arg,
@@ -381,6 +387,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       ((vk.S.num_vars as f64).log2() as usize + 1),
     );
 
+    // commitments for evaluations
+    let comm_eval_E = self.eval_arg.get_eval_commitment(0);
+    let comm_eval_W = self.eval_arg.get_eval_commitment(1);
 
     // derive the verifier's challenge tau
     let tau = (0..num_rounds_x)
@@ -414,10 +423,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let (comm_Az_claim, comm_Bz_claim, comm_Cz_claim, comm_prod_Az_Bz_claims) = &self.claims_outer;
     let (pok_Cz_claim, proof_prod) = &self.pok_claims_inner;
 
-
     pok_Cz_claim.verify(&vk.sumcheck_gens.gens_1, &mut transcript, comm_Cz_claim)?;
-
-    
 
     println!("Verified pok Cz claim");
 
@@ -429,20 +435,24 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       comm_prod_Az_Bz_claims,
     )?;
 
-
-    println!("Verified proof prod");
+    println!("Verified prod proof");
 
     let taus_bound_rx = EqPolynomial::new(tau).evaluate(&r_x);
 
-    let expected_claim_post_outer = (
-      (comm_prod_Az_Bz_claims.decompress()? - comm_Cz_claim.decompress()?) * taus_bound_rx
+
+    let comm_expected_claim_post_outer = (
+      (comm_prod_Az_Bz_claims.decompress()? - 
+       (comm_Cz_claim.decompress()? * U.u + comm_eval_E)) * taus_bound_rx
     ).compress();
+
+    println!("[VERIFIER] taus {:?}", taus_bound_rx);
+    println!("[VERIFIER] comm_expected_claim_post_outer {:?}", comm_expected_claim_post_outer);
 
     // verify proof that expected_claim_post_outer == claim_post_outer
     self.proof_eq_sc_outer.verify(
       &vk.sumcheck_gens.gens_1,
       &mut transcript,
-      &expected_claim_post_outer,
+      &comm_expected_claim_post_outer,
       &comm_claim_post_outer,
     )?;
 
@@ -476,7 +486,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     println!("Verified sc proof inner");
 
 
-    let comm_eval_W = self.eval_arg.get_eval_commitment(1);
     
     // verify claim_inner_final
     let comm_eval_Z = {

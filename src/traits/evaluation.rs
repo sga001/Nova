@@ -48,9 +48,10 @@ pub trait EvaluationEngineTrait<G: Group>:
     transcript: &mut Transcript,
     comm: &[<Self::CE as CommitmentEngineTrait<G>>::Commitment],
     polys: &[Vec<G::Scalar>],
-    randomness: &[G::Scalar],
+    blinds_polys: &[G::Scalar],
     points: &[Vec<G::Scalar>],
     evals: &[G::Scalar],
+    blinds_evals: &[G::Scalar],
   ) -> Result<Self::EvaluationArgument, NovaError>;
 
   /// A method to verify purported evaluations of a batch of polynomials
