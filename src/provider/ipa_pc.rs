@@ -42,12 +42,12 @@ impl<G: Group> GetGeneratorsTrait<G> for EvaluationGens<G> {
 pub struct EvaluationArgument<G: Group> {
   nifs: Vec<NIFSForInnerProduct<G>>,
   ipa: InnerProductArgument<G>,
-  eval_commitments: Vec<Commitment<G>>,
+  eval_commitments: Vec<CompressedCommitment<G>>,
 }
 
 
 impl<G: Group> GetEvalCommitmentsTrait<G> for EvaluationArgument<G> {
-  fn get_eval_commitment(&self, index: usize) -> Commitment<G> {
+  fn get_eval_commitment(&self, index: usize) -> CompressedCommitment<G> {
     assert!(self.eval_commitments.len() > index);
     self.eval_commitments[index].clone()
   }
@@ -71,7 +71,7 @@ where
   fn setup(gens: &<Self::CE as CommitmentEngineTrait<G>>::CommitmentGens) -> Self::EvaluationGens {
     EvaluationGens {
       gens_v: gens.clone(),
-      gens_s: CommitmentGens::<G>::new_with_blinding_gen(b"ipa", 1, &gens.get_blinding_gen()),
+      gens_s: CommitmentGens::<G>::new_with_blinding_gen(b"gens_s", 1, &gens.get_blinding_gen()),
     }
   }
 
@@ -103,7 +103,7 @@ where
       &comm_y_vec_0,
     );
 
-    comms_y_vec.push(comm_y_vec_0);
+    comms_y_vec.push(comm_y_vec_0.compress());
 
     // Record value of eval and randomness used in commitment in the witness
     let mut W_folded = InnerProductWitness::new(&polys[0], &rand_polys[0], &y_vec[0], &rand_y_vec[0]);
@@ -128,7 +128,7 @@ where
       );
 
       nifs.push(n);
-      comms_y_vec.push(comm_y_vec_i);
+      comms_y_vec.push(comm_y_vec_i.compress());
 
       U_folded = u;
       W_folded = w;
@@ -162,7 +162,7 @@ where
     let mut U_folded = InnerProductInstance::new(
       &comms_x_vec[0],
       &EqPolynomial::new(points[0].clone()).evals(),
-      &comms_y_vec[0],
+      &comms_y_vec[0].decompress()?,
     );
     let mut num_vars = points[0].len();
     for i in 1..comms_x_vec.len() {
@@ -171,7 +171,7 @@ where
         &InnerProductInstance::new(
           &comms_x_vec[i],
           &EqPolynomial::new(points[i].clone()).evals(),
-          &comms_y_vec[i],
+          &comms_y_vec[i].decompress()?,
         ),
         transcript,
       );

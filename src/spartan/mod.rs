@@ -39,10 +39,10 @@ pub struct SumcheckGens<G: Group> {
 
 impl<G: Group> SumcheckGens<G> {
   /// Creates new generators for sumcheck
-  pub fn new(label: &'static [u8]) -> Self {
-    let gens_1 = CommitmentGens::<G>::new_exact(label, 1);
-    let gens_3 = CommitmentGens::<G>::new_exact(label, 3);
-    let gens_4 = CommitmentGens::<G>::new_exact(label, 4);
+  pub fn new(label: &'static [u8], scalar_gen: &CommitmentGens<G>) -> Self {
+    let gens_1 = scalar_gen.clone();
+    let gens_3 = CommitmentGens::<G>::new_exact_with_blinding_gen(label, 3, &gens_1.get_blinding_gen());
+    let gens_4 = CommitmentGens::<G>::new_exact_with_blinding_gen(label, 4, &gens_1.get_blinding_gen());
 
     Self {
       gens_1,
@@ -63,9 +63,12 @@ pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
 
 impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> ProverKeyTrait<G> for ProverKey<G, EE> {
   fn new(gens: &R1CSGens<G>, S: &R1CSShape<G>) -> Self {
+    let gens = EE::setup(&gens.gens);
+    let scalar_gen = &gens.get_scalar_gen();
+
     ProverKey {
-      gens: EE::setup(&gens.gens),
-      sumcheck_gens: SumcheckGens::<G>::new(b"sumcheck gens"),
+      gens,
+      sumcheck_gens: SumcheckGens::<G>::new(b"gens_s", scalar_gen),
       S: S.clone(),
     }
   }
@@ -84,9 +87,12 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> VerifierKeyTrait<G>
   for VerifierKey<G, EE>
 {
   fn new(gens: &R1CSGens<G>, S: &R1CSShape<G>) -> Self {
+    let gens = EE::setup(&gens.gens);
+    let scalar_gen = &gens.get_scalar_gen();
+
     VerifierKey {
-      gens: EE::setup(&gens.gens),
-      sumcheck_gens: SumcheckGens::<G>::new(b"sumcheck gens"),
+      gens,
+      sumcheck_gens: SumcheckGens::<G>::new(b"gens_s", scalar_gen),
       S: S.clone(),
     }
   }
@@ -228,18 +234,18 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     }?;
 
     // prove the final step of sumcheck outer
-    let tau_bound_rx = tau_claim;
+    let taus_bound_rx = tau_claim;
 
     // Evaluate E at r_x. We do this to compute blind and claim of outer sumcheck
     let eval_E = MultilinearPolynomial::new(W.E.clone()).evaluate(&r_x);
     let blind_eval_E = G::Scalar::random(&mut OsRng);
 
-    let test_claim = U.u * Cz_claim + eval_E;
 
-    println!("[PROVER] Real claim: {:?} / expected claim: {:?}", &poly_uCz_E[0], test_claim);
+    let blind_expected_claim_outer = *taus_bound_rx * (prod_Az_Bz_blind - (U.u * Cz_blind + blind_eval_E));
+    let claim_post_outer = *taus_bound_rx * (*Az_claim * *Bz_claim - (U.u * Cz_claim + eval_E));
 
-    let blind_expected_claim_outer = *tau_bound_rx * (prod_Az_Bz_blind - (U.u * Cz_blind + blind_eval_E));
-    let claim_post_outer = *tau_bound_rx * (*Az_claim * *Bz_claim - (U.u * Cz_claim + eval_E));
+
+    let test_comm = G::CE::commit(&pk.sumcheck_gens.gens_1, &[claim_post_outer], &blind_expected_claim_outer).compress();
 
     let (proof_eq_sc_outer, _C1, _C2) = EqualityProof::<G>::prove(
       &pk.sumcheck_gens.gens_1,
@@ -438,15 +444,11 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     println!("Verified prod proof");
 
     let taus_bound_rx = EqPolynomial::new(tau).evaluate(&r_x);
-
-
     let comm_expected_claim_post_outer = (
       (comm_prod_Az_Bz_claims.decompress()? - 
-       (comm_Cz_claim.decompress()? * U.u + comm_eval_E)) * taus_bound_rx
+       (comm_Cz_claim.decompress()? * U.u + comm_eval_E.decompress()?)) * taus_bound_rx
     ).compress();
 
-    println!("[VERIFIER] taus {:?}", taus_bound_rx);
-    println!("[VERIFIER] comm_expected_claim_post_outer {:?}", comm_expected_claim_post_outer);
 
     // verify proof that expected_claim_post_outer == claim_post_outer
     self.proof_eq_sc_outer.verify(
@@ -484,8 +486,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
 
 
     println!("Verified sc proof inner");
-
-
     
     // verify claim_inner_final
     let comm_eval_Z = {
@@ -501,7 +501,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
         SparsePolynomial::new((vk.S.num_vars as f64).log2() as usize, poly_X).evaluate(&r_y[1..])
       };
       
-      comm_eval_W * (G::Scalar::one() - r_y[0]) +
+      comm_eval_W.decompress()? * (G::Scalar::one() - r_y[0]) +
         G::CE::commit(&vk.gens.get_scalar_gen(), &[eval_X], &G::Scalar::zero()) * r_y[0]
     };
 

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// A trait that returns commitment of an evaluation argument
 pub trait GetEvalCommitmentsTrait<G: Group> {
   /// Returns the commitment at index
-  fn get_eval_commitment(&self, index: usize) -> <G::CE as CommitmentEngineTrait<G>>::Commitment;
+  fn get_eval_commitment(&self, index: usize) -> <G::CE as CommitmentEngineTrait<G>>::CompressedCommitment;
 }
 
 /// A trait that returns the generators

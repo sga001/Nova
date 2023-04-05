@@ -82,6 +82,18 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
     }
   }
 
+  fn new_exact_with_blinding_gen(
+    label: &'static [u8],
+    n: usize,
+    h: &G::PreprocessedGroupElement,
+  ) -> Self {
+    CommitmentGens {
+      gens: G::from_label(label, n),
+      h: h.clone(),
+      _p: Default::default(),
+    }
+  }
+
   fn len(&self) -> usize {
     self.gens.len()
   }
