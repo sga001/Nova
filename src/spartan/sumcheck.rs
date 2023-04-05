@@ -83,9 +83,10 @@ impl<G: Group> ZKSumcheckProof<G> {
         comm_claim_per_round.append_to_transcript(b"comm_claim_per_round", transcript);
         comm_eval.append_to_transcript(b"comm_eval", transcript);
 
+
         // produce two weights
-        let w0 = G::Scalar::challenge(b"combine_two_claims_to_one_w0", transcript);
-        let w1 = G::Scalar::challenge(b"combine_two_claims_to_one_w1", transcript);
+        let w0 = G::Scalar::challenge(b"combine_two_claims_to_one_0", transcript);
+        let w1 = G::Scalar::challenge(b"combine_two_claims_to_one_1", transcript);
 
         let decompressed_comm_claim_per_round = comm_claim_per_round.decompress()?;
         let decompressed_comm_eval = comm_eval.decompress()?;
@@ -431,6 +432,7 @@ impl<G: Group> ZKSumcheckProof<G> {
         // produce two weights
         let w0 = G::Scalar::challenge(b"combine_two_claims_to_one_0", transcript);
         let w1 = G::Scalar::challenge(b"combine_two_claims_to_one_1", transcript);
+
 
         let decompressed_comm_claim_per_round = comm_claim_per_round.decompress()?;
         let decompressed_comm_eval = comm_eval.decompress()?;

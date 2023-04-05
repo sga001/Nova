@@ -151,6 +151,7 @@ impl<G: Group> EqualityProof<G> {
   ) -> Result<(), NovaError> {
     transcript.append_message(b"protocol-name", EqualityProof::<G>::protocol_name());
     C1.append_to_transcript(b"C1", transcript);
+    C2.append_to_transcript(b"C2", transcript);
     self.alpha.append_to_transcript(b"alpha", transcript);
 
     let c = G::Scalar::challenge(b"c", transcript);
