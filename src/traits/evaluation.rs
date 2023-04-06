@@ -50,6 +50,7 @@ pub trait EvaluationEngineTrait<G: Group>:
   fn setup(gens: &<Self::CE as CommitmentEngineTrait<G>>::CommitmentGens) -> Self::EvaluationGens;
 
   /// A method to prove evaluations of a batch of polynomials
+  #[allow(clippy::too_many_arguments)]
   fn prove_batch(
     gens: &Self::EvaluationGens,
     transcript: &mut Transcript,

@@ -64,7 +64,7 @@ impl<G: Group> KnowledgeProof<G> {
     let t1 = G::Scalar::random(&mut OsRng);
     let t2 = G::Scalar::random(&mut OsRng);
 
-    let C = G::CE::commit(gens_n, &[x.clone()], r).compress();
+    let C = G::CE::commit(gens_n, &[*x], r).compress();
     C.append_to_transcript(b"C", transcript);
 
     let alpha = G::CE::commit(gens_n, &[t1], &t2).compress();
@@ -90,7 +90,7 @@ impl<G: Group> KnowledgeProof<G> {
 
     let c = G::Scalar::challenge(b"c", transcript);
 
-    let lhs = G::CE::commit(gens_n, &[self.z1.clone()], &self.z2).compress();
+    let lhs = G::CE::commit(gens_n, &[self.z1], &self.z2).compress();
     let rhs = (C.decompress()? * c + self.alpha.decompress()?).compress();
 
     if lhs == rhs {
@@ -126,10 +126,10 @@ impl<G: Group> EqualityProof<G> {
     // produce a random scalar
     let r = G::Scalar::random(&mut OsRng);
 
-    let C1 = G::CE::commit(gens_n, &[v1.clone()], s1).compress();
+    let C1 = G::CE::commit(gens_n, &[*v1], s1).compress();
     C1.append_to_transcript(b"C1", transcript);
 
-    let C2 = G::CE::commit(gens_n, &[v2.clone()], s2).compress();
+    let C2 = G::CE::commit(gens_n, &[*v2], s2).compress();
     C2.append_to_transcript(b"C2", transcript);
 
     let alpha = G::CE::commit(gens_n, &[G::Scalar::zero()], &r).compress(); // h^r
@@ -203,13 +203,13 @@ impl<G: Group> ProductProof<G> {
     let b4 = G::Scalar::random(&mut OsRng);
     let b5 = G::Scalar::random(&mut OsRng);
 
-    let X = G::CE::commit(gens_n, &[x.clone()], rX).compress();
+    let X = G::CE::commit(gens_n, &[*x], rX).compress();
     X.append_to_transcript(b"X", transcript);
 
-    let Y = G::CE::commit(gens_n, &[y.clone()], rY).compress();
+    let Y = G::CE::commit(gens_n, &[*y], rY).compress();
     Y.append_to_transcript(b"Y", transcript);
 
-    let Z = G::CE::commit(gens_n, &[z.clone()], rZ).compress();
+    let Z = G::CE::commit(gens_n, &[*z], rZ).compress();
     Z.append_to_transcript(b"Z", transcript);
 
     let alpha = G::CE::commit(gens_n, &[b1], &b2).compress();
@@ -349,7 +349,7 @@ impl<G: Group> DotProductProof<G> {
     let Cx = CE::<G>::commit(gens_n, x_vec, blind_x).compress();
     Cx.append_to_transcript(b"Cx", transcript);
 
-    let Cy = CE::<G>::commit(gens_1, &[y.clone()], blind_y).compress();
+    let Cy = CE::<G>::commit(gens_1, &[*y], blind_y).compress();
     Cy.append_to_transcript(b"Cy", transcript);
 
     a_vec.append_to_transcript(b"a", transcript);

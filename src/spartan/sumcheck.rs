@@ -165,9 +165,9 @@ impl<G: Group> ZKSumcheckProof<G> {
       )
     };
 
-    let mut claim_per_round = claim.clone();
+    let mut claim_per_round = *claim;
     let mut comm_claim_per_round =
-      CE::<G>::commit(&gens_1, &[claim_per_round], &blind_claim).compress();
+      CE::<G>::commit(gens_1, &[claim_per_round], blind_claim).compress();
 
     let mut r = Vec::new();
     let mut comm_polys = Vec::new();

@@ -93,7 +93,7 @@ where
     let mut comms_y_vec = Vec::new();
 
     // Commit to y_vec[0]
-    let comm_y_vec_0 = CE::<G>::commit(&gens.gens_s, &[y_vec[0].clone()], &rand_y_vec[0]);
+    let comm_y_vec_0 = CE::<G>::commit(&gens.gens_s, &[y_vec[0]], &rand_y_vec[0]);
 
     let mut U_folded = InnerProductInstance::new(
       &comms_x_vec[0],
@@ -110,11 +110,11 @@ where
 
     for i in 1..polys.len() {
       // Commit to y_vec[i]
-      let comm_y_vec_i = CE::<G>::commit(&gens.gens_s, &[y_vec[i].clone()], &rand_y_vec[i]);
+      let comm_y_vec_i = CE::<G>::commit(&gens.gens_s, &[y_vec[i]], &rand_y_vec[i]);
 
       // perform the folding
       let (n, u, w) = NIFSForInnerProduct::prove(
-        &gens,
+        gens,
         &U_folded,
         &W_folded,
         &InnerProductInstance::new(
@@ -299,7 +299,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
 
     // commit to the cross-term
     let r_cross = G::Scalar::random(&mut OsRng);
-    let comm_cross = CE::<G>::commit(&gens.gens_s, &[cross_term.clone()], &r_cross);
+    let comm_cross = CE::<G>::commit(&gens.gens_s, &[cross_term], &r_cross);
 
     // add the commitment of the cross-term to the transcript
     comm_cross.append_to_transcript(b"cross_term", transcript);
@@ -328,7 +328,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
 
     // generate commitment to y
     let r_y = W1.r_y + W2.r_y * r * r + r_cross * r;
-    let comm_y = CE::<G>::commit(&gens.gens_s, &[y.clone()], &r_y);
+    let comm_y = CE::<G>::commit(&gens.gens_s, &[y], &r_y);
 
     let W = InnerProductWitness { x_vec, r_x, y, r_y };
 
@@ -446,7 +446,7 @@ where
     let r_R = G::Scalar::random(&mut OsRng);
 
     let P_L = CE::<G>::commit(
-      &gens_R.combine(&gens_y),
+      &gens_R.combine(gens_y),
       &x_vec[0..n / 2]
         .iter()
         .chain(iter::once(&y_L))
@@ -456,7 +456,7 @@ where
     );
 
     let P_R = CE::<G>::commit(
-      &gens_L.combine(&gens_y),
+      &gens_L.combine(gens_y),
       &x_vec[n / 2..n]
         .iter()
         .chain(iter::once(&y_R))
@@ -541,7 +541,7 @@ where
       .map(|(a_L, a_R)| *a_L * chal_inverse + chal * *a_R)
       .collect::<Vec<G::Scalar>>();
 
-    let P_prime = P_L.clone() * chal_square + P.clone() + P_R.clone() * chal_inverse_square;
+    let P_prime = *P_L * chal_square + *P + *P_R * chal_inverse_square;
 
     Ok((P_prime, a_vec_prime, gens_prime))
   }
@@ -605,7 +605,7 @@ where
     let mut x_vec = W.x_vec.to_vec();
     let mut a_vec = U.a_vec.to_vec();
     let mut gens = gens.clone();
-    let mut y = W.y.clone();
+    let mut y = W.y;
 
     for _i in 0..(U.a_vec.len() as f64).log2() as usize {
       let (r_P_prime, P_L, P_R, y_prime, x_vec_prime, a_vec_prime, gens_prime) =
@@ -633,7 +633,7 @@ where
     let r_delta = G::Scalar::random(&mut OsRng);
     let r_beta = G::Scalar::random(&mut OsRng);
 
-    let delta = CE::<G>::commit(&g_hat, &[d.clone()], &r_delta).compress();
+    let delta = CE::<G>::commit(&g_hat, &[d], &r_delta).compress();
     let beta = CE::<G>::commit(&gens_y, &[d], &r_beta).compress();
 
     beta.append_to_transcript(b"beta", transcript);

@@ -529,7 +529,7 @@ impl<G: Group> RelaxedR1CSWitness<G> {
   pub fn from_r1cs_witness(S: &R1CSShape<G>, witness: &R1CSWitness<G>) -> RelaxedR1CSWitness<G> {
     RelaxedR1CSWitness {
       W: witness.W.clone(),
-      r_W: witness.r_W.clone(),
+      r_W: witness.r_W,
       E: vec![G::Scalar::zero(); S.num_cons],
       r_E: G::Scalar::zero(),
     }
@@ -591,9 +591,9 @@ impl<G: Group> RelaxedR1CSWitness<G> {
 
     Self {
       W,
-      r_W: self.r_W.clone(),
+      r_W: self.r_W,
       E,
-      r_E: self.r_E.clone(),
+      r_E: self.r_E,
     }
   }
 }

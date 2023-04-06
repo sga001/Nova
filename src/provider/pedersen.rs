@@ -102,16 +102,14 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
     assert!(self.gens.len() >= v.len());
 
     let mut scalars: Vec<G::Scalar> = v.to_vec();
-    scalars.push(r.clone());
+    scalars.push(*r);
 
     let mut bases = self.gens[..v.len()].to_vec();
     bases.push(self.h.clone());
 
-    let com = Commitment {
+    Self::Commitment {
       comm: G::vartime_multiscalar_mul(&scalars, &bases),
-    };
-
-    com
+    }
   }
 
   fn get_gens(&self) -> Vec<G::PreprocessedGroupElement> {

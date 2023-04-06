@@ -357,9 +357,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let eval_arg = EE::prove_batch(
       &pk.gens,
       &mut transcript,
-      &[U.comm_E, U.comm_W],           // commitment to x_vec in Hyrax
-      &[W.E.clone(), W.W.clone()],     // x_vec in Hyrax
-      &[W.r_E.clone(), W.r_W.clone()], // decommitment to x_vec
+      &[U.comm_E, U.comm_W],       // commitment to x_vec in Hyrax
+      &[W.E.clone(), W.W.clone()], // x_vec in Hyrax
+      &[W.r_E, W.r_W],             // decommitment to x_vec
       &[r_x, r_y[1..].to_vec()],
       &[eval_E, eval_W], // y_vec in Hyrax
       &[blind_eval_E, blind_eval_W],
