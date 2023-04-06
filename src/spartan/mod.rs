@@ -244,9 +244,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let blind_expected_claim_outer = *taus_bound_rx * (prod_Az_Bz_blind - (U.u * Cz_blind + blind_eval_E));
     let claim_post_outer = *taus_bound_rx * (*Az_claim * *Bz_claim - (U.u * Cz_claim + eval_E));
 
-
-    let test_comm = G::CE::commit(&pk.sumcheck_gens.gens_1, &[claim_post_outer], &blind_expected_claim_outer).compress();
-
     let (proof_eq_sc_outer, _C1, _C2) = EqualityProof::<G>::prove(
       &pk.sumcheck_gens.gens_1,
       &mut transcript,
@@ -328,18 +325,23 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
         &claim_inner_joint,
         &blind_claim_inner_joint,
         num_rounds_y,
-        &mut MultilinearPolynomial::new(poly_ABC),
         &mut MultilinearPolynomial::new(poly_z),
+        &mut MultilinearPolynomial::new(poly_ABC),
         comb_func,
         &pk.sumcheck_gens.gens_1,
         &pk.sumcheck_gens.gens_3,
         &mut transcript,
       )?;
 
+    let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
+    let blind_eval_W = G::Scalar::random(&mut OsRng);
+
     // prove the final step of inner sumcheck
-    let blind_eval_Z_at_ry = (G::Scalar::one() - r_y[0]) * W.r_W.clone();
+    let blind_eval_Z_at_ry = (G::Scalar::one() - r_y[0]) * blind_eval_W;
     let blind_expected_claim_post_inner = claims_inner[1] * blind_eval_Z_at_ry;
     let claim_post_inner = claims_inner[0] * claims_inner[1];
+
+    //TODO: sort this out
 
     let (proof_eq_sc_inner, _C1, _C2) = EqualityProof::prove(
       &pk.gens.get_scalar_gen(),
@@ -349,9 +351,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &claim_post_inner,
       &blind_claim_postsc_inner,
     )?;
-
-    let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
-    let blind_eval_W = G::Scalar::random(&mut OsRng);
 
     let eval_arg = EE::prove_batch(
       &pk.gens,
@@ -411,7 +410,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     .compress();
 
 
-    println!("About to start verification");
 
     let (comm_claim_post_outer, r_x) = self.sc_proof_outer.verify(
       &claim_outer_comm,
@@ -423,15 +421,12 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     )?;
 
 
-    println!("Verified sc proof outer");
-
     // perform the intermediate sum-check test with claimed Az, Bz, and Cz
     let (comm_Az_claim, comm_Bz_claim, comm_Cz_claim, comm_prod_Az_Bz_claims) = &self.claims_outer;
     let (pok_Cz_claim, proof_prod) = &self.pok_claims_inner;
 
     pok_Cz_claim.verify(&vk.sumcheck_gens.gens_1, &mut transcript, comm_Cz_claim)?;
 
-    println!("Verified pok Cz claim");
 
     proof_prod.verify(
       &vk.sumcheck_gens.gens_1,
@@ -440,8 +435,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       comm_Bz_claim,
       comm_prod_Az_Bz_claims,
     )?;
-
-    println!("Verified prod proof");
 
     let taus_bound_rx = EqPolynomial::new(tau).evaluate(&r_x);
     let comm_expected_claim_post_outer = (
@@ -457,9 +450,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &comm_expected_claim_post_outer,
       &comm_claim_post_outer,
     )?;
-
-    println!("Verified proof eq sc outer");
-
 
     // inner sum-check
     
@@ -485,8 +475,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     )?;
 
 
-    println!("Verified sc proof inner");
-    
     // verify claim_inner_final
     let comm_eval_Z = {
       let eval_X = {
@@ -504,7 +492,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       comm_eval_W.decompress()? * (G::Scalar::one() - r_y[0]) +
         G::CE::commit(&vk.gens.get_scalar_gen(), &[eval_X], &G::Scalar::zero()) * r_y[0]
     };
-
 
     // perform the final check in the second sum-check protocol
 
@@ -544,8 +531,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     )?;
 
 
-    println!("Verified proof eq sc inner");
-
     // verify eval_W and eval_E
     EE::verify_batch(
       &vk.gens,
@@ -555,8 +540,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &self.eval_arg,
     )?;
 
-
-    println!("Verified batch");
 
     Ok(())
   }
