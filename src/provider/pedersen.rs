@@ -11,7 +11,7 @@ use crate::{
 use core::{
   fmt::Debug,
   marker::PhantomData,
-  ops::{Add, AddAssign, Mul, MulAssign},
+  ops::{Add, AddAssign, Mul, MulAssign, Sub},
 };
 use ff::Field;
 use merlin::Transcript;
@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentGens<G: Group> {
   gens: Vec<G::PreprocessedGroupElement>,
+  h: G::PreprocessedGroupElement,
   _p: PhantomData<G>,
 }
 
@@ -44,8 +45,51 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
   type CompressedCommitment = CompressedCommitment<G::CompressedGroupElement>;
 
   fn new(label: &'static [u8], n: usize) -> Self {
+    let mut blinding_label = label.to_vec();
+    blinding_label.extend(b"blinding factor");
+    let blinding = G::from_label(&blinding_label, 1);
+    let h = blinding.first().unwrap().clone();
+
     CommitmentGens {
       gens: G::from_label(label, n.next_power_of_two()),
+      h,
+      _p: Default::default(),
+    }
+  }
+
+  fn new_exact(label: &'static [u8], n: usize) -> Self {
+    let mut blinding_label = label.to_vec();
+    blinding_label.extend(b"blinding factor");
+    let blinding = G::from_label(&blinding_label, 1);
+    let h = blinding.first().unwrap().clone();
+
+    CommitmentGens {
+      gens: G::from_label(label, n),
+      h,
+      _p: Default::default(),
+    }
+  }
+
+  fn new_with_blinding_gen(
+    label: &'static [u8],
+    n: usize,
+    h: &G::PreprocessedGroupElement,
+  ) -> Self {
+    CommitmentGens {
+      gens: G::from_label(label, n.next_power_of_two()),
+      h: h.clone(),
+      _p: Default::default(),
+    }
+  }
+
+  fn new_exact_with_blinding_gen(
+    label: &'static [u8],
+    n: usize,
+    h: &G::PreprocessedGroupElement,
+  ) -> Self {
+    CommitmentGens {
+      gens: G::from_label(label, n),
+      h: h.clone(),
       _p: Default::default(),
     }
   }
@@ -54,11 +98,26 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
     self.gens.len()
   }
 
-  fn commit(&self, v: &[G::Scalar]) -> Self::Commitment {
+  fn commit(&self, v: &[G::Scalar], r: &G::Scalar) -> Self::Commitment {
     assert!(self.gens.len() >= v.len());
-    Commitment {
-      comm: G::vartime_multiscalar_mul(v, &self.gens[..v.len()]),
+
+    let mut scalars: Vec<G::Scalar> = v.to_vec();
+    scalars.push(*r);
+
+    let mut bases = self.gens[..v.len()].to_vec();
+    bases.push(self.h.clone());
+
+    Self::Commitment {
+      comm: G::vartime_multiscalar_mul(&scalars, &bases),
     }
+  }
+
+  fn get_gens(&self) -> Vec<G::PreprocessedGroupElement> {
+    self.gens.clone()
+  }
+
+  fn get_blinding_gen(&self) -> G::PreprocessedGroupElement {
+    self.h.clone()
   }
 }
 
@@ -163,6 +222,15 @@ impl<'a, 'b, G: Group> Add<&'b Commitment<G>> for &'a Commitment<G> {
   }
 }
 
+impl<'a, 'b, G: Group> Sub<&'b Commitment<G>> for &'a Commitment<G> {
+  type Output = Commitment<G>;
+  fn sub(self, other: &'b Commitment<G>) -> Commitment<G> {
+    Commitment {
+      comm: self.comm - other.comm,
+    }
+  }
+}
+
 macro_rules! define_add_variants {
   (G = $g:path, LHS = $lhs:ty, RHS = $rhs:ty, Output = $out:ty) => {
     impl<'b, G: $g> Add<&'b $rhs> for $lhs {
@@ -188,6 +256,31 @@ macro_rules! define_add_variants {
   };
 }
 
+macro_rules! define_sub_variants {
+  (G = $g:path, LHS = $lhs:ty, RHS = $rhs:ty, Output = $out:ty) => {
+    impl<'b, G: $g> Sub<&'b $rhs> for $lhs {
+      type Output = $out;
+      fn sub(self, rhs: &'b $rhs) -> $out {
+        &self - rhs
+      }
+    }
+
+    impl<'a, G: $g> Sub<$rhs> for &'a $lhs {
+      type Output = $out;
+      fn sub(self, rhs: $rhs) -> $out {
+        self - &rhs
+      }
+    }
+
+    impl<G: $g> Sub<$rhs> for $lhs {
+      type Output = $out;
+      fn sub(self, rhs: $rhs) -> $out {
+        &self - &rhs
+      }
+    }
+  };
+}
+
 macro_rules! define_add_assign_variants {
   (G = $g:path, LHS = $lhs:ty, RHS = $rhs:ty) => {
     impl<G: $g> AddAssign<$rhs> for $lhs {
@@ -200,6 +293,7 @@ macro_rules! define_add_assign_variants {
 
 define_add_assign_variants!(G = Group, LHS = Commitment<G>, RHS = Commitment<G>);
 define_add_variants!(G = Group, LHS = Commitment<G>, RHS = Commitment<G>, Output = Commitment<G>);
+define_sub_variants!(G = Group, LHS = Commitment<G>, RHS = Commitment<G>, Output = Commitment<G>);
 
 /// Provides a commitment engine
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,8 +306,8 @@ impl<G: Group> CommitmentEngineTrait<G> for CommitmentEngine<G> {
   type Commitment = Commitment<G>;
   type CompressedCommitment = CompressedCommitment<G::CompressedGroupElement>;
 
-  fn commit(gens: &Self::CommitmentGens, v: &[G::Scalar]) -> Self::Commitment {
-    gens.commit(v)
+  fn commit(gens: &Self::CommitmentGens, v: &[G::Scalar], r: &G::Scalar) -> Self::Commitment {
+    gens.commit(v, r)
   }
 }
 
@@ -233,13 +327,6 @@ pub(crate) trait CommitmentGensExtTrait<G: Group>: CommitmentGensTrait<G> {
 
   /// Scales the commitment key using the provided scalar
   fn scale(&self, r: &G::Scalar) -> Self;
-
-  /// Reinterprets commitments as commitment keys
-  fn reinterpret_commitments_as_gens(
-    c: &[<<Self as CommitmentGensExtTrait<G>>::CE as CommitmentEngineTrait<G>>::CompressedCommitment],
-  ) -> Result<Self, NovaError>
-  where
-    Self: Sized;
 }
 
 impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
@@ -249,10 +336,12 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
     (
       CommitmentGens {
         gens: self.gens[0..n].to_vec(),
+        h: self.h.clone(),
         _p: Default::default(),
       },
       CommitmentGens {
         gens: self.gens[n..].to_vec(),
+        h: self.h.clone(),
         _p: Default::default(),
       },
     )
@@ -266,6 +355,7 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
     };
     CommitmentGens {
       gens,
+      h: self.h.clone(),
       _p: Default::default(),
     }
   }
@@ -285,6 +375,7 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
 
     CommitmentGens {
       gens,
+      h: self.h.clone(),
       _p: Default::default(),
     }
   }
@@ -300,25 +391,8 @@ impl<G: Group> CommitmentGensExtTrait<G> for CommitmentGens<G> {
 
     CommitmentGens {
       gens: gens_scaled,
+      h: self.h.clone(),
       _p: Default::default(),
     }
-  }
-
-  /// reinterprets a vector of commitments as a set of generators
-  fn reinterpret_commitments_as_gens(
-    c: &[CompressedCommitment<G::CompressedGroupElement>],
-  ) -> Result<Self, NovaError> {
-    let d = (0..c.len())
-      .into_par_iter()
-      .map(|i| c[i].decompress())
-      .collect::<Result<Vec<Commitment<G>>, NovaError>>()?;
-    let gens = (0..d.len())
-      .into_par_iter()
-      .map(|i| d[i].comm.preprocessed())
-      .collect();
-    Ok(CommitmentGens {
-      gens,
-      _p: Default::default(),
-    })
   }
 }

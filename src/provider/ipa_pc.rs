@@ -5,8 +5,10 @@ use crate::{
   provider::pedersen::CommitmentGensExtTrait,
   spartan::polynomial::EqPolynomial,
   traits::{
-    commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait},
-    evaluation::EvaluationEngineTrait,
+    commitment::{
+      CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait,
+    },
+    evaluation::{EvaluationEngineTrait, GetEvalCommitmentsTrait, GetGeneratorsTrait},
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
   Commitment, CommitmentGens, CompressedCommitment, CE,
@@ -14,6 +16,7 @@ use crate::{
 use core::{cmp::max, iter};
 use ff::Field;
 use merlin::Transcript;
+use rand::rngs::OsRng;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -22,8 +25,14 @@ use std::marker::PhantomData;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct EvaluationGens<G: Group> {
-  gens_v: CommitmentGens<G>,
-  gens_s: CommitmentGens<G>,
+  gens_v: CommitmentGens<G>, // This is a generator for vectors
+  gens_s: CommitmentGens<G>, // This is a generator for scalars
+}
+
+impl<G: Group> GetGeneratorsTrait<G> for EvaluationGens<G> {
+  fn get_scalar_gen(&self) -> CommitmentGens<G> {
+    self.gens_s.clone()
+  }
 }
 
 /// Provides an implementation of a polynomial evaluation argument
@@ -32,6 +41,14 @@ pub struct EvaluationGens<G: Group> {
 pub struct EvaluationArgument<G: Group> {
   nifs: Vec<NIFSForInnerProduct<G>>,
   ipa: InnerProductArgument<G>,
+  eval_commitments: Vec<CompressedCommitment<G>>,
+}
+
+impl<G: Group> GetEvalCommitmentsTrait<G> for EvaluationArgument<G> {
+  fn get_eval_commitment(&self, index: usize) -> CompressedCommitment<G> {
+    assert!(self.eval_commitments.len() > index);
+    self.eval_commitments[index].clone()
+  }
 }
 
 /// Provides an implementation of a polynomial evaluation engine using IPA
@@ -52,85 +69,107 @@ where
   fn setup(gens: &<Self::CE as CommitmentEngineTrait<G>>::CommitmentGens) -> Self::EvaluationGens {
     EvaluationGens {
       gens_v: gens.clone(),
-      gens_s: CommitmentGens::<G>::new(b"ipa", 1),
+      gens_s: CommitmentGens::<G>::new_with_blinding_gen(b"gens_s", 1, &gens.get_blinding_gen()),
     }
   }
 
   fn prove_batch(
     gens: &Self::EvaluationGens,
     transcript: &mut Transcript,
-    comms: &[Commitment<G>],
-    polys: &[Vec<G::Scalar>],
+    comms_x_vec: &[Commitment<G>], // commitments to the x_vector in Hyrax
+    polys: &[Vec<G::Scalar>],      // x_vector in Hyrax
+    rand_polys: &[G::Scalar],      // decommitment of x_vector
     points: &[Vec<G::Scalar>],
-    evals: &[G::Scalar],
+    y_vec: &[G::Scalar],
+    rand_y_vec: &[G::Scalar],               // decommitment of y_vec
+    comm_y_vec: &[CompressedCommitment<G>], //commitment to y_vec
   ) -> Result<Self::EvaluationArgument, NovaError> {
     // sanity checks (these should never fail)
     assert!(polys.len() >= 2);
-    assert_eq!(comms.len(), polys.len());
-    assert_eq!(comms.len(), points.len());
-    assert_eq!(comms.len(), evals.len());
+    assert_eq!(comms_x_vec.len(), polys.len());
+    assert_eq!(comms_x_vec.len(), points.len());
+    assert_eq!(comms_x_vec.len(), y_vec.len());
+    assert_eq!(y_vec.len(), rand_y_vec.len());
 
-    let mut r_U = InnerProductInstance::new(
-      &comms[0],
+    let mut comms_y_vec = Vec::new();
+
+    let mut U_folded = InnerProductInstance::new(
+      &comms_x_vec[0],
       &EqPolynomial::new(points[0].clone()).evals(),
-      &evals[0],
+      &comm_y_vec[0].decompress()?,
     );
-    let mut r_W = InnerProductWitness::new(&polys[0]);
+
+    comms_y_vec.push(comm_y_vec[0].clone());
+
+    // Record value of eval and randomness used in commitment in the witness
+    let mut W_folded =
+      InnerProductWitness::new(&polys[0], &rand_polys[0], &y_vec[0], &rand_y_vec[0]);
     let mut nifs = Vec::new();
 
     for i in 1..polys.len() {
+      // perform the folding
       let (n, u, w) = NIFSForInnerProduct::prove(
-        &r_U,
-        &r_W,
+        gens,
+        &U_folded,
+        &W_folded,
         &InnerProductInstance::new(
-          &comms[i],
+          &comms_x_vec[i],
           &EqPolynomial::new(points[i].clone()).evals(),
-          &evals[i],
+          &comm_y_vec[i].decompress()?,
         ),
-        &InnerProductWitness::new(&polys[i]),
+        &InnerProductWitness::new(&polys[i], &rand_polys[i], &y_vec[i], &rand_y_vec[i]),
         transcript,
       );
+
       nifs.push(n);
-      r_U = u;
-      r_W = w;
+      comms_y_vec.push(comm_y_vec[i].clone());
+
+      U_folded = u;
+      W_folded = w;
     }
 
-    let ipa = InnerProductArgument::prove(&gens.gens_v, &gens.gens_s, &r_U, &r_W, transcript)?;
+    let ipa =
+      InnerProductArgument::prove(&gens.gens_v, &gens.gens_s, &U_folded, &W_folded, transcript)?;
 
-    Ok(EvaluationArgument { nifs, ipa })
+    Ok(EvaluationArgument {
+      nifs,
+      ipa,
+      eval_commitments: comms_y_vec,
+    })
   }
 
   /// A method to verify purported evaluations of a batch of polynomials
   fn verify_batch(
     gens: &Self::EvaluationGens,
     transcript: &mut Transcript,
-    comms: &[Commitment<G>],
+    comms_x_vec: &[Commitment<G>],
     points: &[Vec<G::Scalar>],
-    evals: &[G::Scalar],
     arg: &Self::EvaluationArgument,
   ) -> Result<(), NovaError> {
-    // sanity checks (these should never fail)
-    assert!(comms.len() >= 2);
-    assert_eq!(comms.len(), points.len());
-    assert_eq!(comms.len(), evals.len());
+    let comms_y_vec = &arg.eval_commitments;
 
-    let mut r_U = InnerProductInstance::new(
-      &comms[0],
+    // sanity checks (these should never fail)
+    assert!(comms_x_vec.len() >= 2);
+    assert_eq!(comms_x_vec.len(), points.len());
+    assert_eq!(comms_x_vec.len(), comms_y_vec.len());
+
+    let mut U_folded = InnerProductInstance::new(
+      &comms_x_vec[0],
       &EqPolynomial::new(points[0].clone()).evals(),
-      &evals[0],
+      &comms_y_vec[0].decompress()?,
     );
     let mut num_vars = points[0].len();
-    for i in 1..comms.len() {
+    for i in 1..comms_x_vec.len() {
       let u = arg.nifs[i - 1].verify(
-        &r_U,
+        &U_folded,
         &InnerProductInstance::new(
-          &comms[i],
+          &comms_x_vec[i],
           &EqPolynomial::new(points[i].clone()).evals(),
-          &evals[i],
+          &comms_y_vec[i].decompress()?,
         ),
         transcript,
       );
-      r_U = u;
+      U_folded = u;
       num_vars = max(num_vars, points[i].len());
     }
 
@@ -138,7 +177,7 @@ where
       &gens.gens_v,
       &gens.gens_s,
       (2_usize).pow(num_vars as u32),
-      &r_U,
+      &U_folded,
       transcript,
     )?;
 
@@ -158,55 +197,67 @@ where
 }
 
 /// An inner product instance consists of a commitment to a vector `a` and another vector `b`
-/// and the claim that c = <a, b>.
+/// and the claim that y = <x, a>.
 pub struct InnerProductInstance<G: Group> {
-  comm_a_vec: Commitment<G>,
-  b_vec: Vec<G::Scalar>,
-  c: G::Scalar,
+  comm_x_vec: Commitment<G>,
+  a_vec: Vec<G::Scalar>,
+  comm_y: Commitment<G>, // commitment to scalar c
 }
 
 impl<G: Group> InnerProductInstance<G> {
-  fn new(comm_a_vec: &Commitment<G>, b_vec: &[G::Scalar], c: &G::Scalar) -> Self {
+  fn new(comm_x_vec: &Commitment<G>, a_vec: &[G::Scalar], comm_y: &Commitment<G>) -> Self {
     InnerProductInstance {
-      comm_a_vec: *comm_a_vec,
-      b_vec: b_vec.to_vec(),
-      c: *c,
+      comm_x_vec: *comm_x_vec,
+      a_vec: a_vec.to_vec(),
+      comm_y: *comm_y,
     }
   }
 
   fn pad(&self, n: usize) -> InnerProductInstance<G> {
-    let mut b_vec = self.b_vec.clone();
-    b_vec.resize(n, G::Scalar::zero());
+    let mut a_vec = self.a_vec.clone();
+    a_vec.resize(n, G::Scalar::zero());
     InnerProductInstance {
-      comm_a_vec: self.comm_a_vec,
-      b_vec,
-      c: self.c,
+      comm_x_vec: self.comm_x_vec,
+      a_vec,
+      comm_y: self.comm_y,
     }
   }
 }
 
 struct InnerProductWitness<G: Group> {
-  a_vec: Vec<G::Scalar>,
+  x_vec: Vec<G::Scalar>,
+  r_x: G::Scalar,
+  y: G::Scalar,
+  r_y: G::Scalar,
 }
 
 impl<G: Group> InnerProductWitness<G> {
-  fn new(a_vec: &[G::Scalar]) -> Self {
+  fn new(x_vec: &[G::Scalar], r_x: &G::Scalar, y: &G::Scalar, r_y: &G::Scalar) -> Self {
     InnerProductWitness {
-      a_vec: a_vec.to_vec(),
+      x_vec: x_vec.to_vec(),
+      r_x: *r_x,
+      y: *y,
+      r_y: *r_y,
     }
   }
 
   fn pad(&self, n: usize) -> InnerProductWitness<G> {
-    let mut a_vec = self.a_vec.clone();
-    a_vec.resize(n, G::Scalar::zero());
-    InnerProductWitness { a_vec }
+    let mut x_vec = self.x_vec.clone();
+    x_vec.resize(n, G::Scalar::zero());
+    InnerProductWitness {
+      x_vec,
+      r_x: self.r_x,
+      y: self.y,
+      r_y: self.r_y,
+    }
   }
 }
 
 /// A non-interactive folding scheme (NIFS) for inner product relations
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct NIFSForInnerProduct<G: Group> {
-  cross_term: G::Scalar,
+  comm_cross_term: Commitment<G>, // commitment to cross term (which is a scalar)
 }
 
 impl<G: Group> NIFSForInnerProduct<G> {
@@ -215,6 +266,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
   }
 
   fn prove(
+    gens: &EvaluationGens<G>,
     U1: &InnerProductInstance<G>,
     W1: &InnerProductWitness<G>,
     U2: &InnerProductInstance<G>,
@@ -224,53 +276,70 @@ impl<G: Group> NIFSForInnerProduct<G> {
     transcript.append_message(b"protocol-name", Self::protocol_name());
 
     // pad the instances and witness so they are of the same length
-    let U1 = U1.pad(max(U1.b_vec.len(), U2.b_vec.len()));
-    let U2 = U2.pad(max(U1.b_vec.len(), U2.b_vec.len()));
-    let W1 = W1.pad(max(U1.b_vec.len(), U2.b_vec.len()));
-    let W2 = W2.pad(max(U1.b_vec.len(), U2.b_vec.len()));
+    let U1 = U1.pad(max(U1.a_vec.len(), U2.a_vec.len()));
+    let U2 = U2.pad(max(U1.a_vec.len(), U2.a_vec.len()));
+    let W1 = W1.pad(max(U1.a_vec.len(), U2.a_vec.len()));
+    let W2 = W2.pad(max(U1.a_vec.len(), U2.a_vec.len()));
 
     // add the two commitments and two public vectors to the transcript
-    U1.comm_a_vec
-      .append_to_transcript(b"U1_comm_a_vec", transcript);
-    U1.b_vec.append_to_transcript(b"U1_b_vec", transcript);
-    U2.comm_a_vec
-      .append_to_transcript(b"U2_comm_a_vec", transcript);
-    U2.b_vec.append_to_transcript(b"U2_b_vec", transcript);
+    U1.comm_x_vec
+      .append_to_transcript(b"U1_comm_x_vec", transcript);
+    U1.a_vec.append_to_transcript(b"U1_a_vec", transcript);
+    U2.comm_x_vec
+      .append_to_transcript(b"U2_comm_x_vec", transcript);
+    U2.a_vec.append_to_transcript(b"U2_a_vec", transcript);
 
     // compute the cross-term
-    let cross_term = inner_product(&W1.a_vec, &U2.b_vec) + inner_product(&W2.a_vec, &U1.b_vec);
+    let cross_term = inner_product(&W1.x_vec, &U2.a_vec) + inner_product(&W2.x_vec, &U1.a_vec);
 
-    // add the cross-term to the transcript
-    cross_term.append_to_transcript(b"cross_term", transcript);
+    // commit to the cross-term
+    let r_cross = G::Scalar::random(&mut OsRng);
+    let comm_cross = CE::<G>::commit(&gens.gens_s, &[cross_term], &r_cross);
+
+    // add the commitment of the cross-term to the transcript
+    comm_cross.append_to_transcript(b"cross_term", transcript);
 
     // obtain a random challenge
     let r = G::Scalar::challenge(b"r", transcript);
 
     // fold the vectors and their inner product
-    let a_vec = W1
-      .a_vec
+    let x_vec = W1
+      .x_vec
       .par_iter()
-      .zip(W2.a_vec.par_iter())
+      .zip(W2.x_vec.par_iter())
       .map(|(x1, x2)| *x1 + r * x2)
       .collect::<Vec<G::Scalar>>();
-    let b_vec = U1
-      .b_vec
+    let a_vec = U1
+      .a_vec
       .par_iter()
-      .zip(U2.b_vec.par_iter())
+      .zip(U2.a_vec.par_iter())
       .map(|(a1, a2)| *a1 + r * a2)
       .collect::<Vec<G::Scalar>>();
 
-    let c = U1.c + r * r * U2.c + r * cross_term;
-    let comm_a_vec = U1.comm_a_vec + U2.comm_a_vec * r;
+    // fold using the cross term and fold x_vec as well
+    let y = W1.y + r * r * W2.y + r * cross_term;
+    let comm_x_vec = U1.comm_x_vec + U2.comm_x_vec * r;
+    let r_x = W1.r_x + W2.r_x * r;
 
-    let W = InnerProductWitness { a_vec };
+    // generate commitment to y
+    let r_y = W1.r_y + W2.r_y * r * r + r_cross * r;
+    let comm_y = CE::<G>::commit(&gens.gens_s, &[y], &r_y);
+
+    let W = InnerProductWitness { x_vec, r_x, y, r_y };
+
     let U = InnerProductInstance {
-      comm_a_vec,
-      b_vec,
-      c,
+      comm_x_vec,
+      a_vec,
+      comm_y,
     };
 
-    (NIFSForInnerProduct { cross_term }, U, W)
+    (
+      NIFSForInnerProduct {
+        comm_cross_term: comm_cross,
+      },
+      U,
+      W,
+    )
   }
 
   fn verify(
@@ -282,39 +351,40 @@ impl<G: Group> NIFSForInnerProduct<G> {
     transcript.append_message(b"protocol-name", Self::protocol_name());
 
     // pad the instances so they are of the same length
-    let U1 = U1.pad(max(U1.b_vec.len(), U2.b_vec.len()));
-    let U2 = U2.pad(max(U1.b_vec.len(), U2.b_vec.len()));
+    let U1 = U1.pad(max(U1.a_vec.len(), U2.a_vec.len()));
+    let U2 = U2.pad(max(U1.a_vec.len(), U2.a_vec.len()));
 
     // add the two commitments and two public vectors to the transcript
-    U1.comm_a_vec
-      .append_to_transcript(b"U1_comm_a_vec", transcript);
-    U1.b_vec.append_to_transcript(b"U1_b_vec", transcript);
-    U2.comm_a_vec
-      .append_to_transcript(b"U2_comm_a_vec", transcript);
-    U2.b_vec.append_to_transcript(b"U2_b_vec", transcript);
+    U1.comm_x_vec
+      .append_to_transcript(b"U1_comm_x_vec", transcript);
+    U1.a_vec.append_to_transcript(b"U1_a_vec", transcript);
+    U2.comm_x_vec
+      .append_to_transcript(b"U2_comm_x_vec", transcript);
+    U2.a_vec.append_to_transcript(b"U2_a_vec", transcript);
 
-    // add the cross-term to the transcript
+    // add the commitment to the cross-term to the transcript
     self
-      .cross_term
+      .comm_cross_term
       .append_to_transcript(b"cross_term", transcript);
 
     // obtain a random challenge
     let r = G::Scalar::challenge(b"r", transcript);
 
     // fold the vectors and their inner product
-    let b_vec = U1
-      .b_vec
+    let a_vec = U1
+      .a_vec
       .par_iter()
-      .zip(U2.b_vec.par_iter())
-      .map(|(a1, a2)| *a1 + r * a2)
+      .zip(U2.a_vec.par_iter())
+      .map(|(x1, x2)| *x1 + r * x2)
       .collect::<Vec<G::Scalar>>();
-    let c = U1.c + r * r * U2.c + r * self.cross_term;
-    let comm_a_vec = U1.comm_a_vec + U2.comm_a_vec * r;
+
+    let comm_y = U1.comm_y + U2.comm_y * r * r + self.comm_cross_term * r;
+    let comm_x_vec = U1.comm_x_vec + U2.comm_x_vec * r;
 
     InnerProductInstance {
-      comm_a_vec,
-      b_vec,
-      c,
+      comm_x_vec,
+      a_vec,
+      comm_y,
     }
   }
 }
@@ -323,9 +393,12 @@ impl<G: Group> NIFSForInnerProduct<G> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 struct InnerProductArgument<G: Group> {
-  L_vec: Vec<CompressedCommitment<G>>,
-  R_vec: Vec<CompressedCommitment<G>>,
-  a_hat: G::Scalar,
+  P_L_vec: Vec<CompressedCommitment<G>>,
+  P_R_vec: Vec<CompressedCommitment<G>>,
+  delta: CompressedCommitment<G>,
+  beta: CompressedCommitment<G>,
+  z_1: G::Scalar,
+  z_2: G::Scalar,
   _p: PhantomData<G>,
 }
 
@@ -338,114 +411,241 @@ where
     b"inner product argument"
   }
 
+  fn bullet_reduce_prover(
+    r_P: &G::Scalar,
+    x_vec: &[G::Scalar],
+    a_vec: &[G::Scalar],
+    y: &G::Scalar,
+    gens: &CommitmentGens<G>,
+    gens_y: &CommitmentGens<G>,
+    transcript: &mut Transcript,
+  ) -> Result<
+    (
+      G::Scalar,         // r_P'
+      Commitment<G>,     // P_L
+      Commitment<G>,     // P_R
+      G::Scalar,         // y_prime
+      Vec<G::Scalar>,    // x_vec'
+      Vec<G::Scalar>,    // a_vec'
+      CommitmentGens<G>, // gens'
+    ),
+    NovaError,
+  > {
+    let n = x_vec.len();
+    let (gens_L, gens_R) = gens.split_at(n / 2);
+
+    let y_L = inner_product(&x_vec[0..n / 2], &a_vec[n / 2..n]);
+    let y_R = inner_product(&x_vec[n / 2..n], &a_vec[0..n / 2]);
+
+    let r_L = G::Scalar::random(&mut OsRng);
+    let r_R = G::Scalar::random(&mut OsRng);
+
+    let P_L = CE::<G>::commit(
+      &gens_R.combine(gens_y),
+      &x_vec[0..n / 2]
+        .iter()
+        .chain(iter::once(&y_L))
+        .copied()
+        .collect::<Vec<G::Scalar>>(),
+      &r_L,
+    );
+
+    let P_R = CE::<G>::commit(
+      &gens_L.combine(gens_y),
+      &x_vec[n / 2..n]
+        .iter()
+        .chain(iter::once(&y_R))
+        .copied()
+        .collect::<Vec<G::Scalar>>(),
+      &r_R,
+    );
+
+    P_L.append_to_transcript(b"L", transcript);
+    P_R.append_to_transcript(b"R", transcript);
+
+    let chal = G::Scalar::challenge(b"challenge_r", transcript);
+
+    let chal_square = chal * chal;
+    let chal_inverse = chal.invert().unwrap();
+    let chal_inverse_square = chal_inverse * chal_inverse;
+
+    // fold the left half and the right half
+    let x_vec_prime = x_vec[0..n / 2]
+      .par_iter()
+      .zip(x_vec[n / 2..n].par_iter())
+      .map(|(x_L, x_R)| *x_L * chal + chal_inverse * *x_R)
+      .collect::<Vec<G::Scalar>>();
+
+    let a_vec_prime = a_vec[0..n / 2]
+      .par_iter()
+      .zip(a_vec[n / 2..n].par_iter())
+      .map(|(a_L, a_R)| *a_L * chal_inverse + chal * *a_R)
+      .collect::<Vec<G::Scalar>>();
+
+    let gens_folded = gens.fold(&chal_inverse, &chal);
+
+    let y_prime = chal_square * y_L + y + chal_inverse_square * y_R;
+    let r_P_prime = r_L * chal_square + r_P + r_R * chal_inverse_square;
+
+    Ok((
+      r_P_prime,
+      P_L,
+      P_R,
+      y_prime,
+      x_vec_prime,
+      a_vec_prime,
+      gens_folded,
+    ))
+  }
+
+  fn bullet_reduce_verifier(
+    P: &Commitment<G>,
+    P_L: &Commitment<G>,
+    P_R: &Commitment<G>,
+    a_vec: &[G::Scalar],
+    gens: &CommitmentGens<G>,
+    transcript: &mut Transcript,
+  ) -> Result<
+    (
+      Commitment<G>,     // P'
+      Vec<G::Scalar>,    // a_vec'
+      CommitmentGens<G>, // gens'
+    ),
+    NovaError,
+  > {
+    let n = a_vec.len();
+
+    P_L.append_to_transcript(b"L", transcript);
+    P_R.append_to_transcript(b"R", transcript);
+
+    let chal = G::Scalar::challenge(b"challenge_r", transcript);
+
+    //    println!("Challenge in bullet_reduce_verifier {:?}", chal);
+
+    let chal_square = chal * chal;
+    let chal_inverse = chal.invert().unwrap();
+    let chal_inverse_square = chal_inverse * chal_inverse;
+
+    // This takes care of splitting them in half and multiplying left half
+    // by chal_inverse and right half by chal
+    let gens_prime = gens.fold(&chal_inverse, &chal);
+
+    let a_vec_prime = a_vec[0..n / 2]
+      .par_iter()
+      .zip(a_vec[n / 2..n].par_iter())
+      .map(|(a_L, a_R)| *a_L * chal_inverse + chal * *a_R)
+      .collect::<Vec<G::Scalar>>();
+
+    let P_prime = *P_L * chal_square + *P + *P_R * chal_inverse_square;
+
+    Ok((P_prime, a_vec_prime, gens_prime))
+  }
+
   fn prove(
     gens: &CommitmentGens<G>,
-    gens_c: &CommitmentGens<G>,
+    gens_y: &CommitmentGens<G>,
     U: &InnerProductInstance<G>,
     W: &InnerProductWitness<G>,
     transcript: &mut Transcript,
   ) -> Result<Self, NovaError> {
+    // The goal here is to prove that x_vec * a_vec = y.
+    // We have a hiding vector commitment to x_vec, and a hiding commitment to y.
+    // a_vec is a vector in the clear.
+
+    // We will prove this based on Hyrax's Figure 7 and 8.
+    // Translation of variables from this code to Hyrax's paper
+    //
+    // Code                     Hyrax
+    // ------------------------------
+    // x_vec                    \vec{x}
+    // r_x                      r_\Xi
+    // comm_x_vec               \Xi
+    //
+    // a_vec                    \vec{a}
+    //
+    // y                        y
+    // comm_y                   \tau
+    // r_y                      r_\tau
+
+    // P                        \Upsilon
+    // r_P                      r_\Upsilon
+    //
+    // gens                     vec<g_i>
+    // gens_y                   g
+
     transcript.append_message(b"protocol-name", Self::protocol_name());
 
-    if U.b_vec.len() != W.a_vec.len() {
+    if U.a_vec.len() != W.x_vec.len() {
       return Err(NovaError::InvalidInputLength);
     }
 
-    U.comm_a_vec.append_to_transcript(b"comm_a_vec", transcript);
-    U.b_vec.append_to_transcript(b"b_vec", transcript);
-    U.c.append_to_transcript(b"c", transcript);
+    U.comm_x_vec.append_to_transcript(b"comm_x_vec", transcript);
+    U.a_vec.append_to_transcript(b"a_vec", transcript);
+    U.comm_y.append_to_transcript(b"y", transcript);
 
-    // sample a random base for commiting to the inner product
-    let r = G::Scalar::challenge(b"r", transcript);
-    let gens_c = gens_c.scale(&r);
+    // Scale generator to be consistent with Bulletproofs Figure 1 (in the Bulletproofs
+    // figure, gens_y is "u" and chal is "x").
+    let chal = G::Scalar::challenge(b"r", transcript);
+    let gens_y = gens_y.scale(&chal);
 
-    // a closure that executes a step of the recursive inner product argument
-    let prove_inner = |a_vec: &[G::Scalar],
-                       b_vec: &[G::Scalar],
-                       gens: &CommitmentGens<G>,
-                       transcript: &mut Transcript|
-     -> Result<
-      (
-        CompressedCommitment<G>,
-        CompressedCommitment<G>,
-        Vec<G::Scalar>,
-        Vec<G::Scalar>,
-        CommitmentGens<G>,
-      ),
-      NovaError,
-    > {
-      let n = a_vec.len();
-      let (gens_L, gens_R) = gens.split_at(n / 2);
+    // two vectors to hold the logarithmic number of group elements, and their masks
+    let mut P_L_vec: Vec<CompressedCommitment<G>> = Vec::new();
+    let mut P_R_vec: Vec<CompressedCommitment<G>> = Vec::new();
 
-      let c_L = inner_product(&a_vec[0..n / 2], &b_vec[n / 2..n]);
-      let c_R = inner_product(&a_vec[n / 2..n], &b_vec[0..n / 2]);
-
-      let L = CE::<G>::commit(
-        &gens_R.combine(&gens_c),
-        &a_vec[0..n / 2]
-          .iter()
-          .chain(iter::once(&c_L))
-          .copied()
-          .collect::<Vec<G::Scalar>>(),
-      )
-      .compress();
-      let R = CE::<G>::commit(
-        &gens_L.combine(&gens_c),
-        &a_vec[n / 2..n]
-          .iter()
-          .chain(iter::once(&c_R))
-          .copied()
-          .collect::<Vec<G::Scalar>>(),
-      )
-      .compress();
-
-      L.append_to_transcript(b"L", transcript);
-      R.append_to_transcript(b"R", transcript);
-
-      let r = G::Scalar::challenge(b"challenge_r", transcript);
-      let r_inverse = r.invert().unwrap();
-
-      // fold the left half and the right half
-      let a_vec_folded = a_vec[0..n / 2]
-        .par_iter()
-        .zip(a_vec[n / 2..n].par_iter())
-        .map(|(a_L, a_R)| *a_L * r + r_inverse * *a_R)
-        .collect::<Vec<G::Scalar>>();
-
-      let b_vec_folded = b_vec[0..n / 2]
-        .par_iter()
-        .zip(b_vec[n / 2..n].par_iter())
-        .map(|(b_L, b_R)| *b_L * r_inverse + r * *b_R)
-        .collect::<Vec<G::Scalar>>();
-
-      let gens_folded = gens.fold(&r_inverse, &r);
-
-      Ok((L, R, a_vec_folded, b_vec_folded, gens_folded))
-    };
-
-    // two vectors to hold the logarithmic number of group elements
-    let mut L_vec: Vec<CompressedCommitment<G>> = Vec::new();
-    let mut R_vec: Vec<CompressedCommitment<G>> = Vec::new();
+    // Step 1 in Hyrax's Figure 7. The prover doesn't need P explicitly, so we don't
+    // need to compute it. We just compute the randomness used in the commitment.
+    let mut r_P = W.r_x + W.r_y * chal;
 
     // we create mutable copies of vectors and generators
-    let mut a_vec = W.a_vec.to_vec();
-    let mut b_vec = U.b_vec.to_vec();
+    let mut x_vec = W.x_vec.to_vec();
+    let mut a_vec = U.a_vec.to_vec();
     let mut gens = gens.clone();
-    for _i in 0..(U.b_vec.len() as f64).log2() as usize {
-      let (L, R, a_vec_folded, b_vec_folded, gens_folded) =
-        prove_inner(&a_vec, &b_vec, &gens, transcript)?;
-      L_vec.push(L);
-      R_vec.push(R);
+    let mut y = W.y;
 
-      a_vec = a_vec_folded;
-      b_vec = b_vec_folded;
-      gens = gens_folded;
+    for _i in 0..(U.a_vec.len() as f64).log2() as usize {
+      let (r_P_prime, P_L, P_R, y_prime, x_vec_prime, a_vec_prime, gens_prime) =
+        Self::bullet_reduce_prover(&r_P, &x_vec, &a_vec, &y, &gens, &gens_y, transcript)?;
+
+      P_L_vec.push(P_L.compress());
+      P_R_vec.push(P_R.compress());
+
+      r_P = r_P_prime;
+      y = y_prime;
+      x_vec = x_vec_prime;
+      a_vec = a_vec_prime;
+      gens = gens_prime;
     }
 
+    assert_eq!(a_vec.len(), 1);
+
+    // This is after the recursive calls to bullet_reduce in Hyrax
+    let r_P_hat = r_P;
+    let y_hat = y;
+    let a_hat = a_vec[0];
+    let g_hat = gens;
+
+    let d = G::Scalar::random(&mut OsRng);
+    let r_delta = G::Scalar::random(&mut OsRng);
+    let r_beta = G::Scalar::random(&mut OsRng);
+
+    let delta = CE::<G>::commit(&g_hat, &[d], &r_delta).compress();
+    let beta = CE::<G>::commit(&gens_y, &[d], &r_beta).compress();
+
+    beta.append_to_transcript(b"beta", transcript);
+    delta.append_to_transcript(b"delta", transcript);
+
+    let chal = G::Scalar::challenge(b"chal_z", transcript);
+
+    let z_1 = d + chal * y_hat;
+    let z_2 = a_hat * ((chal * r_P_hat) + r_beta) + r_delta;
+
     Ok(InnerProductArgument {
-      L_vec,
-      R_vec,
-      a_hat: a_vec[0],
+      P_L_vec,
+      P_R_vec,
+      delta,
+      beta,
+      z_1,
+      z_2,
       _p: Default::default(),
     })
   }
@@ -453,128 +653,67 @@ where
   fn verify(
     &self,
     gens: &CommitmentGens<G>,
-    gens_c: &CommitmentGens<G>,
+    gens_y: &CommitmentGens<G>,
     n: usize,
     U: &InnerProductInstance<G>,
     transcript: &mut Transcript,
   ) -> Result<(), NovaError> {
     transcript.append_message(b"protocol-name", Self::protocol_name());
-    if U.b_vec.len() != n
-      || n != (1 << self.L_vec.len())
-      || self.L_vec.len() != self.R_vec.len()
-      || self.L_vec.len() >= 32
+    if U.a_vec.len() != n
+      || n != (1 << self.P_L_vec.len())
+      || self.P_L_vec.len() != self.P_R_vec.len()
+      || self.P_L_vec.len() >= 32
     {
       return Err(NovaError::InvalidInputLength);
     }
 
-    U.comm_a_vec.append_to_transcript(b"comm_a_vec", transcript);
-    U.b_vec.append_to_transcript(b"b_vec", transcript);
-    U.c.append_to_transcript(b"c", transcript);
+    U.comm_x_vec.append_to_transcript(b"comm_x_vec", transcript);
+    U.a_vec.append_to_transcript(b"a_vec", transcript);
+    U.comm_y.append_to_transcript(b"y", transcript);
 
-    // sample a random base for commiting to the inner product
-    let r = G::Scalar::challenge(b"r", transcript);
-    let gens_c = gens_c.scale(&r);
+    // Scaling to be compatible with Bulletproofs figure 1
+    let chal = G::Scalar::challenge(b"r", transcript); // sample a random challenge for scaling commitment
+    let gens_y = gens_y.scale(&chal);
+    let mut P = U.comm_x_vec + U.comm_y * chal;
 
-    let P = U.comm_a_vec + CE::<G>::commit(&gens_c, &[U.c]);
+    let mut gens = gens.clone();
+    let mut a_vec = U.a_vec.clone();
 
-    let batch_invert = |v: &[G::Scalar]| -> Result<Vec<G::Scalar>, NovaError> {
-      let mut products = vec![G::Scalar::zero(); v.len()];
-      let mut acc = G::Scalar::one();
+    // Step 1 in Hyrax's figure 7.
+    for i in 0..self.P_L_vec.len() {
+      let P_L = self.P_L_vec[i].decompress().unwrap();
+      let P_R = self.P_R_vec[i].decompress().unwrap();
 
-      for i in 0..v.len() {
-        products[i] = acc;
-        acc *= v[i];
-      }
+      let (P_prime, a_vec_prime, gens_prime) =
+        Self::bullet_reduce_verifier(&P, &P_L, &P_R, &a_vec, &gens, transcript)?;
 
-      // we can compute an inversion only if acc is non-zero
-      if acc == G::Scalar::zero() {
-        return Err(NovaError::InvalidInputLength);
-      }
+      P = P_prime;
+      a_vec = a_vec_prime;
+      gens = gens_prime;
+    }
 
-      // compute the inverse once for all entries
-      acc = acc.invert().unwrap();
+    // Step 3 in Hyrax's Figure 7
+    self.beta.append_to_transcript(b"beta", transcript);
+    self.delta.append_to_transcript(b"delta", transcript);
 
-      let mut inv = vec![G::Scalar::zero(); v.len()];
-      for i in 0..v.len() {
-        let tmp = acc * v[v.len() - 1 - i];
-        inv[v.len() - 1 - i] = products[v.len() - 1 - i] * acc;
-        acc = tmp;
-      }
+    let chal = G::Scalar::challenge(b"chal_z", transcript);
 
-      Ok(inv)
-    };
+    let P_plus_beta = P * chal + self.beta.decompress().unwrap();
+    let P_plus_beta_to_a = P_plus_beta * a_vec[0];
+    let left_hand_side = P_plus_beta_to_a + self.delta.decompress().unwrap();
 
-    // compute a vector of public coins using self.L_vec and self.R_vec
-    let r = (0..self.L_vec.len())
-      .map(|i| {
-        self.L_vec[i].append_to_transcript(b"L", transcript);
-        self.R_vec[i].append_to_transcript(b"R", transcript);
-        G::Scalar::challenge(b"challenge_r", transcript)
-      })
-      .collect::<Vec<G::Scalar>>();
+    let g_hat = CE::<G>::commit(&gens, &[G::Scalar::one()], &G::Scalar::zero());
+    let g_to_a = CE::<G>::commit(&gens_y, &a_vec, &G::Scalar::zero()); // g^a*h^0 = g^a
+    let h_to_z2 = CE::<G>::commit(&gens_y, &[G::Scalar::zero()], &self.z_2); // g^0 * h^z2 = h^z2
 
-    // precompute scalars necessary for verification
-    let r_square: Vec<G::Scalar> = (0..self.L_vec.len())
-      .into_par_iter()
-      .map(|i| r[i] * r[i])
-      .collect();
-    let r_inverse = batch_invert(&r)?;
-    let r_inverse_square: Vec<G::Scalar> = (0..self.L_vec.len())
-      .into_par_iter()
-      .map(|i| r_inverse[i] * r_inverse[i])
-      .collect();
+    let g_hat_plus_g_to_a = g_hat + g_to_a;
+    let val_to_z1 = g_hat_plus_g_to_a * self.z_1;
+    let right_hand_side = val_to_z1 + h_to_z2;
 
-    // compute the vector with the tensor structure
-    let s = {
-      let mut s = vec![G::Scalar::zero(); n];
-      s[0] = {
-        let mut v = G::Scalar::one();
-        for r_inverse_i in &r_inverse {
-          v *= r_inverse_i;
-        }
-        v
-      };
-      for i in 1..n {
-        let pos_in_r = (31 - (i as u32).leading_zeros()) as usize;
-        s[i] = s[i - (1 << pos_in_r)] * r_square[(self.L_vec.len() - 1) - pos_in_r];
-      }
-      s
-    };
-
-    let gens_hat = {
-      let c = CE::<G>::commit(gens, &s).compress();
-      CommitmentGens::<G>::reinterpret_commitments_as_gens(&[c])?
-    };
-
-    let b_hat = inner_product(&U.b_vec, &s);
-
-    let P_hat = {
-      let gens_folded = {
-        let gens_L = CommitmentGens::<G>::reinterpret_commitments_as_gens(&self.L_vec)?;
-        let gens_R = CommitmentGens::<G>::reinterpret_commitments_as_gens(&self.R_vec)?;
-        let gens_P = CommitmentGens::<G>::reinterpret_commitments_as_gens(&[P.compress()])?;
-        gens_L.combine(&gens_R).combine(&gens_P)
-      };
-
-      CE::<G>::commit(
-        &gens_folded,
-        &r_square
-          .iter()
-          .chain(r_inverse_square.iter())
-          .chain(iter::once(&G::Scalar::one()))
-          .copied()
-          .collect::<Vec<G::Scalar>>(),
-      )
-    };
-
-    if P_hat
-      == CE::<G>::commit(
-        &gens_hat.combine(&gens_c),
-        &[self.a_hat, self.a_hat * b_hat],
-      )
-    {
+    if left_hand_side == right_hand_side {
       Ok(())
     } else {
+      println!("Invalid IPA! whoops");
       Err(NovaError::InvalidIPA)
     }
   }
