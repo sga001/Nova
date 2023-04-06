@@ -60,6 +60,7 @@ pub trait EvaluationEngineTrait<G: Group>:
     points: &[Vec<G::Scalar>],
     evals: &[G::Scalar],
     blinds_evals: &[G::Scalar],
+    comm_evals: &[<Self::CE as CommitmentEngineTrait<G>>::CompressedCommitment],
   ) -> Result<Self::EvaluationArgument, NovaError>;
 
   /// A method to verify purported evaluations of a batch of polynomials

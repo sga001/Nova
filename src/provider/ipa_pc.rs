@@ -81,7 +81,8 @@ where
     rand_polys: &[G::Scalar],      // decommitment of x_vector
     points: &[Vec<G::Scalar>],
     y_vec: &[G::Scalar],
-    rand_y_vec: &[G::Scalar], // decommitment of y_vec
+    rand_y_vec: &[G::Scalar],               // decommitment of y_vec
+    comm_y_vec: &[CompressedCommitment<G>], //commitment to y_vec
   ) -> Result<Self::EvaluationArgument, NovaError> {
     // sanity checks (these should never fail)
     assert!(polys.len() >= 2);
@@ -92,16 +93,13 @@ where
 
     let mut comms_y_vec = Vec::new();
 
-    // Commit to y_vec[0]
-    let comm_y_vec_0 = CE::<G>::commit(&gens.gens_s, &[y_vec[0]], &rand_y_vec[0]);
-
     let mut U_folded = InnerProductInstance::new(
       &comms_x_vec[0],
       &EqPolynomial::new(points[0].clone()).evals(),
-      &comm_y_vec_0,
+      &comm_y_vec[0].decompress()?,
     );
 
-    comms_y_vec.push(comm_y_vec_0.compress());
+    comms_y_vec.push(comm_y_vec[0].clone());
 
     // Record value of eval and randomness used in commitment in the witness
     let mut W_folded =
@@ -109,9 +107,6 @@ where
     let mut nifs = Vec::new();
 
     for i in 1..polys.len() {
-      // Commit to y_vec[i]
-      let comm_y_vec_i = CE::<G>::commit(&gens.gens_s, &[y_vec[i]], &rand_y_vec[i]);
-
       // perform the folding
       let (n, u, w) = NIFSForInnerProduct::prove(
         gens,
@@ -120,14 +115,14 @@ where
         &InnerProductInstance::new(
           &comms_x_vec[i],
           &EqPolynomial::new(points[i].clone()).evals(),
-          &comm_y_vec_i,
+          &comm_y_vec[i].decompress()?,
         ),
         &InnerProductWitness::new(&polys[i], &rand_polys[i], &y_vec[i], &rand_y_vec[i]),
         transcript,
       );
 
       nifs.push(n);
-      comms_y_vec.push(comm_y_vec_i.compress());
+      comms_y_vec.push(comm_y_vec[i].clone());
 
       U_folded = u;
       W_folded = w;
