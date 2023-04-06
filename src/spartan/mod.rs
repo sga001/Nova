@@ -8,8 +8,10 @@ use crate::{
   errors::NovaError,
   r1cs::{R1CSGens, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{
-    commitment::{CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait},
-    evaluation::{EvaluationEngineTrait, GetGeneratorsTrait, GetEvalCommitmentsTrait},
+    commitment::{
+      CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait,
+    },
+    evaluation::{EvaluationEngineTrait, GetEvalCommitmentsTrait, GetGeneratorsTrait},
     snark::{ProverKeyTrait, RelaxedR1CSSNARKTrait, VerifierKeyTrait},
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
@@ -29,7 +31,7 @@ use sumcheck::ZKSumcheckProof;
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct SumcheckGens<G: Group> {
-  /// 1 Generator 
+  /// 1 Generator
   pub gens_1: CommitmentGens<G>,
   /// 3 Generators
   pub gens_3: CommitmentGens<G>,
@@ -41,8 +43,10 @@ impl<G: Group> SumcheckGens<G> {
   /// Creates new generators for sumcheck
   pub fn new(label: &'static [u8], scalar_gen: &CommitmentGens<G>) -> Self {
     let gens_1 = scalar_gen.clone();
-    let gens_3 = CommitmentGens::<G>::new_exact_with_blinding_gen(label, 3, &gens_1.get_blinding_gen());
-    let gens_4 = CommitmentGens::<G>::new_exact_with_blinding_gen(label, 4, &gens_1.get_blinding_gen());
+    let gens_3 =
+      CommitmentGens::<G>::new_exact_with_blinding_gen(label, 3, &gens_1.get_blinding_gen());
+    let gens_4 =
+      CommitmentGens::<G>::new_exact_with_blinding_gen(label, 4, &gens_1.get_blinding_gen());
 
     Self {
       gens_1,
@@ -197,11 +201,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     assert_eq!(poly_Bz.len(), 1);
     assert_eq!(poly_uCz_E.len(), 1);
 
-    let (tau_claim, Az_claim, Bz_claim) =
-      (&poly_tau[0], &poly_Az[0], &poly_Bz[0]);
+    let (tau_claim, Az_claim, Bz_claim) = (&poly_tau[0], &poly_Az[0], &poly_Bz[0]);
 
     let Cz_claim = poly_Cz.evaluate(&r_x);
-
 
     let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
       G::Scalar::random(&mut OsRng),
@@ -240,8 +242,8 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let eval_E = MultilinearPolynomial::new(W.E.clone()).evaluate(&r_x);
     let blind_eval_E = G::Scalar::random(&mut OsRng);
 
-
-    let blind_expected_claim_outer = *taus_bound_rx * (prod_Az_Bz_blind - (U.u * Cz_blind + blind_eval_E));
+    let blind_expected_claim_outer =
+      *taus_bound_rx * (prod_Az_Bz_blind - (U.u * Cz_blind + blind_eval_E));
     let claim_post_outer = *taus_bound_rx * (*Az_claim * *Bz_claim - (U.u * Cz_claim + eval_E));
 
     let (proof_eq_sc_outer, _C1, _C2) = EqualityProof::<G>::prove(
@@ -409,8 +411,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     )
     .compress();
 
-
-
     let (comm_claim_post_outer, r_x) = self.sc_proof_outer.verify(
       &claim_outer_comm,
       num_rounds_x,
@@ -420,13 +420,11 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &mut transcript,
     )?;
 
-
     // perform the intermediate sum-check test with claimed Az, Bz, and Cz
     let (comm_Az_claim, comm_Bz_claim, comm_Cz_claim, comm_prod_Az_Bz_claims) = &self.claims_outer;
     let (pok_Cz_claim, proof_prod) = &self.pok_claims_inner;
 
     pok_Cz_claim.verify(&vk.sumcheck_gens.gens_1, &mut transcript, comm_Cz_claim)?;
-
 
     proof_prod.verify(
       &vk.sumcheck_gens.gens_1,
@@ -437,11 +435,10 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     )?;
 
     let taus_bound_rx = EqPolynomial::new(tau).evaluate(&r_x);
-    let comm_expected_claim_post_outer = (
-      (comm_prod_Az_Bz_claims.decompress()? - 
-       (comm_Cz_claim.decompress()? * U.u + comm_eval_E.decompress()?)) * taus_bound_rx
-    ).compress();
-
+    let comm_expected_claim_post_outer = ((comm_prod_Az_Bz_claims.decompress()?
+      - (comm_Cz_claim.decompress()? * U.u + comm_eval_E.decompress()?))
+      * taus_bound_rx)
+      .compress();
 
     // verify proof that expected_claim_post_outer == claim_post_outer
     self.proof_eq_sc_outer.verify(
@@ -452,18 +449,18 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     )?;
 
     // inner sum-check
-    
+
     // derive three public challenges and then derive a joint claim
     let r_A = G::Scalar::challenge(b"challenge_rA", &mut transcript);
     let r_B = G::Scalar::challenge(b"challenge_rB", &mut transcript);
     let r_C = G::Scalar::challenge(b"challenge_rC", &mut transcript);
- 
 
     // r_A * comm_Az_claim + r_B * comm_Bz_claim + r_C * comm_Cz_claim;
-    let comm_claim_inner = (comm_Az_claim.decompress()? * r_A + 
-      comm_Bz_claim.decompress()? * r_B + 
-      comm_Cz_claim.decompress()? * r_C).compress();
-    
+    let comm_claim_inner = (comm_Az_claim.decompress()? * r_A
+      + comm_Bz_claim.decompress()? * r_B
+      + comm_Cz_claim.decompress()? * r_C)
+      .compress();
+
     // verify the joint claim with a sum-check protocol
     let (comm_claim_post_inner, r_y) = self.sc_proof_inner.verify(
       &comm_claim_inner,
@@ -471,9 +468,8 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       2,
       &vk.sumcheck_gens.gens_1,
       &vk.sumcheck_gens.gens_3,
-      &mut transcript
+      &mut transcript,
     )?;
-
 
     // verify claim_inner_final
     let comm_eval_Z = {
@@ -488,9 +484,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
         );
         SparsePolynomial::new((vk.S.num_vars as f64).log2() as usize, poly_X).evaluate(&r_y[1..])
       };
-      
-      comm_eval_W.decompress()? * (G::Scalar::one() - r_y[0]) +
-        G::CE::commit(&vk.gens.get_scalar_gen(), &[eval_X], &G::Scalar::zero()) * r_y[0]
+
+      comm_eval_W.decompress()? * (G::Scalar::one() - r_y[0])
+        + G::CE::commit(&vk.gens.get_scalar_gen(), &[eval_X], &G::Scalar::zero()) * r_y[0]
     };
 
     // perform the final check in the second sum-check protocol
@@ -519,8 +515,8 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
 
     let (eval_A_r, eval_B_r, eval_C_r) = evaluate_as_sparse_polynomial(&vk.S, &r_x, &r_y);
 
-    let claim_inner_final_expected = (comm_eval_Z * 
-      (r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r)).compress();
+    let claim_inner_final_expected =
+      (comm_eval_Z * (r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r)).compress();
 
     // verify proof that claim_inner_final_expected == claim_post_inner
     self.proof_eq_sc_inner.verify(
@@ -530,7 +526,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &comm_claim_post_inner,
     )?;
 
-
     // verify eval_W and eval_E
     EE::verify_batch(
       &vk.gens,
@@ -539,7 +534,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       &[r_x, r_y[1..].to_vec()],
       &self.eval_arg,
     )?;
-
 
     Ok(())
   }

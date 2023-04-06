@@ -8,7 +8,7 @@ use crate::{
     commitment::{
       CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait,
     },
-    evaluation::{EvaluationEngineTrait, GetGeneratorsTrait, GetEvalCommitmentsTrait},
+    evaluation::{EvaluationEngineTrait, GetEvalCommitmentsTrait, GetGeneratorsTrait},
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
   Commitment, CommitmentGens, CompressedCommitment, CE,
@@ -35,7 +35,6 @@ impl<G: Group> GetGeneratorsTrait<G> for EvaluationGens<G> {
   }
 }
 
-
 /// Provides an implementation of a polynomial evaluation argument
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -44,7 +43,6 @@ pub struct EvaluationArgument<G: Group> {
   ipa: InnerProductArgument<G>,
   eval_commitments: Vec<CompressedCommitment<G>>,
 }
-
 
 impl<G: Group> GetEvalCommitmentsTrait<G> for EvaluationArgument<G> {
   fn get_eval_commitment(&self, index: usize) -> CompressedCommitment<G> {
@@ -83,7 +81,7 @@ where
     rand_polys: &[G::Scalar],      // decommitment of x_vector
     points: &[Vec<G::Scalar>],
     y_vec: &[G::Scalar],
-    rand_y_vec: &[G::Scalar],      // decommitment of y_vec
+    rand_y_vec: &[G::Scalar], // decommitment of y_vec
   ) -> Result<Self::EvaluationArgument, NovaError> {
     // sanity checks (these should never fail)
     assert!(polys.len() >= 2);
@@ -106,7 +104,8 @@ where
     comms_y_vec.push(comm_y_vec_0.compress());
 
     // Record value of eval and randomness used in commitment in the witness
-    let mut W_folded = InnerProductWitness::new(&polys[0], &rand_polys[0], &y_vec[0], &rand_y_vec[0]);
+    let mut W_folded =
+      InnerProductWitness::new(&polys[0], &rand_polys[0], &y_vec[0], &rand_y_vec[0]);
     let mut nifs = Vec::new();
 
     for i in 1..polys.len() {

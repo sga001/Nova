@@ -32,8 +32,11 @@ pub trait CommitmentGensTrait<G: Group>:
     -> Self;
 
   /// Samples a new commitment generator of specific size but reuses an existing blinding generator
-  fn new_exact_with_blinding_gen(label: &'static [u8], n: usize, h: &G::PreprocessedGroupElement)
-    -> Self;
+  fn new_exact_with_blinding_gen(
+    label: &'static [u8],
+    n: usize,
+    h: &G::PreprocessedGroupElement,
+  ) -> Self;
 
   /// Returns the vector length that can be committed
   fn len(&self) -> usize;
