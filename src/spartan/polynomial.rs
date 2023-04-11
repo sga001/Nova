@@ -3,7 +3,8 @@ use core::ops::Index;
 use ff::PrimeField;
 use rayon::prelude::*;
 
-pub(crate) struct EqPolynomial<Scalar: PrimeField> {
+/// polynomial struct
+pub struct EqPolynomial<Scalar: PrimeField> {
   r: Vec<Scalar>,
 }
 
@@ -21,6 +22,7 @@ impl<Scalar: PrimeField> EqPolynomial<Scalar> {
       .fold(Scalar::one(), |acc, item| acc * item)
   }
 
+  /// generates evals
   pub fn evals(&self) -> Vec<Scalar> {
     let ell = self.r.len();
     let mut evals: Vec<Scalar> = vec![Scalar::zero(); (2_usize).pow(ell as u32)];
