@@ -224,7 +224,8 @@ impl<G: Group> InnerProductInstance<G> {
   }
 }
 
-struct InnerProductWitness<G: Group> {
+/// an inner product witness
+pub struct InnerProductWitness<G: Group> {
   x_vec: Vec<G::Scalar>,
   r_x: G::Scalar,
   y: G::Scalar,
@@ -392,7 +393,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
 /// An inner product argument
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-struct InnerProductArgument<G: Group> {
+pub struct InnerProductArgument<G: Group> {
   P_L_vec: Vec<CompressedCommitment<G>>,
   P_R_vec: Vec<CompressedCommitment<G>>,
   delta: CompressedCommitment<G>,
