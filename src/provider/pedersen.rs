@@ -311,7 +311,9 @@ impl<G: Group> CommitmentEngineTrait<G> for CommitmentEngine<G> {
   }
 }
 
-pub(crate) trait CommitmentGensExtTrait<G: Group>: CommitmentGensTrait<G> {
+/// trait for commitment generation
+pub trait CommitmentGensExtTrait<G: Group>: CommitmentGensTrait<G> {
+  /// commitment engine trait
   type CE: CommitmentEngineTrait<G>;
 
   /// Splits the commitment key into two pieces at a specified point

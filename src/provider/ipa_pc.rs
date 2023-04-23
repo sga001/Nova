@@ -205,7 +205,8 @@ pub struct InnerProductInstance<G: Group> {
 }
 
 impl<G: Group> InnerProductInstance<G> {
-  fn new(comm_x_vec: &Commitment<G>, a_vec: &[G::Scalar], comm_y: &Commitment<G>) -> Self {
+  /// new inner product instance  
+  pub fn new(comm_x_vec: &Commitment<G>, a_vec: &[G::Scalar], comm_y: &Commitment<G>) -> Self {
     InnerProductInstance {
       comm_x_vec: *comm_x_vec,
       a_vec: a_vec.to_vec(),
@@ -224,7 +225,8 @@ impl<G: Group> InnerProductInstance<G> {
   }
 }
 
-struct InnerProductWitness<G: Group> {
+/// an inner product witness
+pub struct InnerProductWitness<G: Group> {
   x_vec: Vec<G::Scalar>,
   r_x: G::Scalar,
   y: G::Scalar,
@@ -232,7 +234,8 @@ struct InnerProductWitness<G: Group> {
 }
 
 impl<G: Group> InnerProductWitness<G> {
-  fn new(x_vec: &[G::Scalar], r_x: &G::Scalar, y: &G::Scalar, r_y: &G::Scalar) -> Self {
+  /// new inner product witness
+  pub fn new(x_vec: &[G::Scalar], r_x: &G::Scalar, y: &G::Scalar, r_y: &G::Scalar) -> Self {
     InnerProductWitness {
       x_vec: x_vec.to_vec(),
       r_x: *r_x,
@@ -392,7 +395,7 @@ impl<G: Group> NIFSForInnerProduct<G> {
 /// An inner product argument
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-struct InnerProductArgument<G: Group> {
+pub struct InnerProductArgument<G: Group> {
   P_L_vec: Vec<CompressedCommitment<G>>,
   P_R_vec: Vec<CompressedCommitment<G>>,
   delta: CompressedCommitment<G>,
@@ -541,7 +544,8 @@ where
     Ok((P_prime, a_vec_prime, gens_prime))
   }
 
-  fn prove(
+  /// prover inner product argument
+  pub fn prove(
     gens: &CommitmentGens<G>,
     gens_y: &CommitmentGens<G>,
     U: &InnerProductInstance<G>,
@@ -650,7 +654,8 @@ where
     })
   }
 
-  fn verify(
+  /// verify inner product argument
+  pub fn verify(
     &self,
     gens: &CommitmentGens<G>,
     gens_y: &CommitmentGens<G>,
