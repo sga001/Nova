@@ -45,5 +45,9 @@ criterion = "0.3.1"
 name = "recursive-snark"
 harness = false
 
+[[bench]]
+name = "compressed-snark"
+harness = false
+
 [features]
 default = []
