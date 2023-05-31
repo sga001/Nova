@@ -558,9 +558,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
     pk: &Self::ProverKey,
     U: &RelaxedR1CSInstance<G>,
     W: &RelaxedR1CSWitness<G>,
-    C: &CompressedCommitment<G>,
-    v: &G::Scalar,
-    r_v: &G::Scalar,
+    cap_c: &CompressedCommitment<G>,
+    cap_v: &G::Scalar,
+    cap_r: &G::Scalar,
   ) -> Result<Self, NovaError> {
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
 
@@ -571,7 +571,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
     assert!(pk.S.num_io < pk.S.num_vars);
     
     // append the CAP commitment to the transcript
-    C.append_to_transcript(b"C", &mut transcript);
+    cap_c.append_to_transcript(b"cap_c", &mut transcript);
 
     // append the R1CSShape and RelaxedR1CSInstance to the transcript
     pk.S.append_to_transcript(b"S", &mut transcript);
@@ -795,9 +795,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
       &[W.E.clone(), W.W.clone(), W.W.clone()], // x_vec in Hyrax
       &[W.r_E, W.r_W, W.r_W],                   // decommitment to x_vec
       &[r_x, r_y[1..].to_vec(), vec![G::Scalar::zero(); r_y.len() - 1]],
-      &[eval_E, eval_W, *v],                    // y_vec in Hyrax
-      &[blind_eval_E, blind_eval_W, *r_v],
-      &[comm_eval_E, comm_eval_W, C.clone()],
+      &[eval_E, eval_W, *cap_v],                    // y_vec in Hyrax
+      &[blind_eval_E, blind_eval_W, *cap_r],
+      &[comm_eval_E, comm_eval_W, cap_c.clone()],
     )?;
 
     Ok(RelaxedR1CSSNARK {
@@ -817,11 +817,11 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
   }
 
   /// verifies a proof of satisfiability of a RelaxedR1CS instance
-  fn cap_verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<G>, C: &CompressedCommitment<G>) -> Result<(), NovaError> {
+  fn cap_verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<G>, cap_c: &CompressedCommitment<G>) -> Result<(), NovaError> {
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
 
     // append the R1CSShape and RelaxedR1CSInstance to the transcript
-    C.append_to_transcript(b"C", &mut transcript);
+    cap_c.append_to_transcript(b"cap_c", &mut transcript);
     vk.S.append_to_transcript(b"S", &mut transcript);
     U.append_to_transcript(b"U", &mut transcript);
 

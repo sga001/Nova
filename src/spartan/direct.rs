@@ -6,7 +6,7 @@ use crate::errors::NovaError;
 use crate::traits::{
   circuit::StepCircuit,
   evaluation::EvaluationEngineTrait,
-  snark::{ProverKeyTrait, RelaxedR1CSSNARKTrait, VerifierKeyTrait},
+  snark::{ProverKeyTrait, RelaxedR1CSSNARKTrait, CAPRelaxedR1CSSNARKTrait, VerifierKeyTrait},
   Group,
 };
 
@@ -18,7 +18,7 @@ use crate::{
   },
   r1cs::{R1CSGens, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   spartan::{ProverKey, RelaxedR1CSSNARK, VerifierKey},
-  Commitment,
+  Commitment, CompressedCommitment
 };
 
 use bellperson::{gadgets::num::AllocatedNum, Circuit, ConstraintSystem, SynthesisError};
@@ -161,6 +161,49 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>, C: StepCircuit<G::Scala
 
     Ok(())
   }
+
+  /// Produces a proof of satisfiability of the provided circuit (commit and proof)
+  pub fn cap_prove(pk: &SpartanProverKey<G, EE>, sc: C, z_i: &[G::Scalar], cap_c: &CompressedCommitment<G>,
+    cap_v: &G::Scalar, cap_r: &G::Scalar) -> Result<Self, NovaError> {
+    let mut cs: SatisfyingAssignment<G> = SatisfyingAssignment::new();
+
+    let circuit: SpartanCircuit<G, C> = SpartanCircuit {
+      z_i: Some(z_i.to_vec()),
+      sc,
+    };
+
+    let _ = circuit.synthesize(&mut cs);
+    let (u, w) = cs
+      .r1cs_instance_and_witness(&pk.S, &pk.gens)
+      .map_err(|_e| NovaError::UnSat)?;
+
+    // convert the instance and witness to relaxed form
+    let (u_relaxed, w_relaxed) = (
+      RelaxedR1CSInstance::from_r1cs_instance_unchecked(&u.comm_W, &u.X),
+      RelaxedR1CSWitness::from_r1cs_witness(&pk.S, &w),
+    );
+
+    // prove the instance using Spartan
+    let snark = RelaxedR1CSSNARK::cap_prove(&pk.pk, &u_relaxed, &w_relaxed, cap_c, cap_v, cap_r)?;
+
+    Ok(SpartanSNARK {
+      comm_W: u.comm_W,
+      snark,
+      _p: Default::default(),
+    })
+  }
+
+  /// Verifies a proof of satisfiability (commit and proof)
+  pub fn cap_verify(&self, vk: &SpartanVerifierKey<G, EE>, io: &[G::Scalar], cap_c: &CompressedCommitment<G>) -> Result<(), NovaError> {
+    // construct an instance using the provided commitment to the witness and z_i and z_{i+1}
+    let u_relaxed = RelaxedR1CSInstance::from_r1cs_instance_unchecked(&self.comm_W, io);
+
+    // verify the snark using the constructed instance
+    self.snark.cap_verify(&vk.vk, &u_relaxed, cap_c)?;
+
+    Ok(())
+  }
+
 }
 
 #[cfg(test)]

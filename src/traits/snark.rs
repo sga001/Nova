@@ -59,11 +59,11 @@ pub trait CAPRelaxedR1CSSNARKTrait<G: Group>: RelaxedR1CSSNARKTrait<G>
     pk: &Self::ProverKey,
     U: &RelaxedR1CSInstance<G>,
     W: &RelaxedR1CSWitness<G>,
-    C: &CompressedCommitment<G>,
-    v: &G::Scalar,  // commited value
-    r_v: &G::Scalar, // opening
+    cap_c: &CompressedCommitment<G>,
+    cap_v: &G::Scalar,  // commited value
+    cap_r: &G::Scalar, // opening
   ) -> Result<Self, NovaError>;
 
   /// Verifies a SNARK for a CAP relaxed R1CS
-  fn cap_verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<G>, C: &CompressedCommitment<G>) -> Result<(), NovaError>;
+  fn cap_verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<G>, cap_c: &CompressedCommitment<G>) -> Result<(), NovaError>;
 }
