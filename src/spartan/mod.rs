@@ -13,7 +13,7 @@ use crate::{
       CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait,
     },
     evaluation::{EvaluationEngineTrait, GetEvalCommitmentsTrait, GetGeneratorsTrait},
-    snark::{ProverKeyTrait, RelaxedR1CSSNARKTrait, CAPRelaxedR1CSSNARKTrait, VerifierKeyTrait},
+    snark::{CAPRelaxedR1CSSNARKTrait, ProverKeyTrait, RelaxedR1CSSNARKTrait, VerifierKeyTrait},
     AppendToTranscriptTrait, ChallengeTrait, Group,
   },
   CommitmentGens, CompressedCommitment,
@@ -546,13 +546,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
   }
 }
 
-
-
-
 impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrait<G>
   for RelaxedR1CSSNARK<G, EE>
 {
-
   /// produces a succinct proof of satisfiability of a RelaxedR1CS instance
   fn cap_prove(
     pk: &Self::ProverKey,
@@ -569,7 +565,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
     assert_eq!(pk.S.num_vars.next_power_of_two(), pk.S.num_vars);
     assert_eq!(pk.S.num_io.next_power_of_two(), pk.S.num_io);
     assert!(pk.S.num_io < pk.S.num_vars);
-    
+
     // append the CAP commitment to the transcript
     cap_c.append_to_transcript(b"cap_c", &mut transcript);
 
@@ -787,15 +783,20 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
       &blind_claim_postsc_inner,
     )?;
 
+    let point_for_cap: Vec<G::Scalar> = vec![G::Scalar::one()]
+      .into_iter()
+      .chain(vec![G::Scalar::zero()].repeat(r_y.len() - 2))
+      .collect();
+
     // prove the correctness of eval_E, eval_W, and the commitment C
     let eval_arg = EE::prove_batch(
       &pk.gens,
       &mut transcript,
-      &[U.comm_E, U.comm_W, U.comm_W],          // commitment to x_vec in Hyrax
+      &[U.comm_E, U.comm_W, U.comm_W], // commitment to x_vec in Hyrax
       &[W.E.clone(), W.W.clone(), W.W.clone()], // x_vec in Hyrax
-      &[W.r_E, W.r_W, W.r_W],                   // decommitment to x_vec
-      &[r_x, r_y[1..].to_vec(), vec![G::Scalar::zero(); r_y.len() - 1]],
-      &[eval_E, eval_W, *cap_v],                    // y_vec in Hyrax
+      &[W.r_E, W.r_W, W.r_W],          // decommitment to x_vec
+      &[r_x, r_y[1..].to_vec(), point_for_cap],
+      &[eval_E, eval_W, *cap_v], // y_vec in Hyrax
       &[blind_eval_E, blind_eval_W, *cap_r],
       &[comm_eval_E, comm_eval_W, cap_c.clone()],
     )?;
@@ -817,7 +818,12 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
   }
 
   /// verifies a proof of satisfiability of a RelaxedR1CS instance
-  fn cap_verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<G>, cap_c: &CompressedCommitment<G>) -> Result<(), NovaError> {
+  fn cap_verify(
+    &self,
+    vk: &Self::VerifierKey,
+    U: &RelaxedR1CSInstance<G>,
+    cap_c: &CompressedCommitment<G>,
+  ) -> Result<(), NovaError> {
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
 
     // append the R1CSShape and RelaxedR1CSInstance to the transcript
@@ -964,12 +970,17 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
       &comm_claim_post_inner,
     )?;
 
+    let point_for_cap: Vec<G::Scalar> = vec![G::Scalar::one()]
+      .into_iter()
+      .chain(vec![G::Scalar::zero()].repeat(r_y.len() - 2))
+      .collect();
+
     // verify eval_W and eval_E
     EE::verify_batch(
       &vk.gens,
       &mut transcript,
       &[U.comm_E, U.comm_W, U.comm_W],
-      &[r_x, r_y[1..].to_vec(), vec![G::Scalar::zero(); r_y.len() - 1]],
+      &[r_x, r_y[1..].to_vec(), point_for_cap],
       &self.eval_arg,
     )?;
 

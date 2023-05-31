@@ -6,7 +6,7 @@ use crate::errors::NovaError;
 use crate::traits::{
   circuit::StepCircuit,
   evaluation::EvaluationEngineTrait,
-  snark::{ProverKeyTrait, RelaxedR1CSSNARKTrait, CAPRelaxedR1CSSNARKTrait, VerifierKeyTrait},
+  snark::{CAPRelaxedR1CSSNARKTrait, ProverKeyTrait, RelaxedR1CSSNARKTrait, VerifierKeyTrait},
   Group,
 };
 
@@ -18,7 +18,7 @@ use crate::{
   },
   r1cs::{R1CSGens, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   spartan::{ProverKey, RelaxedR1CSSNARK, VerifierKey},
-  Commitment, CompressedCommitment
+  Commitment, CompressedCommitment,
 };
 
 use bellperson::{gadgets::num::AllocatedNum, Circuit, ConstraintSystem, SynthesisError};
@@ -163,8 +163,14 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>, C: StepCircuit<G::Scala
   }
 
   /// Produces a proof of satisfiability of the provided circuit (commit and proof)
-  pub fn cap_prove(pk: &SpartanProverKey<G, EE>, sc: C, z_i: &[G::Scalar], cap_c: &CompressedCommitment<G>,
-    cap_v: &G::Scalar, cap_r: &G::Scalar) -> Result<Self, NovaError> {
+  pub fn cap_prove(
+    pk: &SpartanProverKey<G, EE>,
+    sc: C,
+    z_i: &[G::Scalar],
+    cap_c: &CompressedCommitment<G>,
+    cap_v: &G::Scalar,
+    cap_r: &G::Scalar,
+  ) -> Result<Self, NovaError> {
     let mut cs: SatisfyingAssignment<G> = SatisfyingAssignment::new();
 
     let circuit: SpartanCircuit<G, C> = SpartanCircuit {
@@ -194,7 +200,12 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>, C: StepCircuit<G::Scala
   }
 
   /// Verifies a proof of satisfiability (commit and proof)
-  pub fn cap_verify(&self, vk: &SpartanVerifierKey<G, EE>, io: &[G::Scalar], cap_c: &CompressedCommitment<G>) -> Result<(), NovaError> {
+  pub fn cap_verify(
+    &self,
+    vk: &SpartanVerifierKey<G, EE>,
+    io: &[G::Scalar],
+    cap_c: &CompressedCommitment<G>,
+  ) -> Result<(), NovaError> {
     // construct an instance using the provided commitment to the witness and z_i and z_{i+1}
     let u_relaxed = RelaxedR1CSInstance::from_r1cs_instance_unchecked(&self.comm_W, io);
 
@@ -203,7 +214,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>, C: StepCircuit<G::Scala
 
     Ok(())
   }
-
 }
 
 #[cfg(test)]
