@@ -3,6 +3,7 @@ use crate::{
   errors::NovaError,
   r1cs::{R1CSGens, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::Group,
+  CompressedCommitment
 };
 
 use serde::{Deserialize, Serialize};
@@ -48,4 +49,21 @@ pub trait RelaxedR1CSSNARKTrait<G: Group>:
 
   /// Verifies a SNARK for a relaxed R1CS
   fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<G>) -> Result<(), NovaError>;
+}
+
+/// A trait that defines the behavior of a commit and proof zkSNARK
+pub trait CAPRelaxedR1CSSNARKTrait<G: Group>: RelaxedR1CSSNARKTrait<G>
+{
+  /// Produces a new SNARK for a commit and prove (CAP) relaxed R1CS
+  fn cap_prove(
+    pk: &Self::ProverKey,
+    U: &RelaxedR1CSInstance<G>,
+    W: &RelaxedR1CSWitness<G>,
+    C: &CompressedCommitment<G>,
+    v: &G::Scalar,  // commited value
+    r_v: &G::Scalar, // opening
+  ) -> Result<Self, NovaError>;
+
+  /// Verifies a SNARK for a CAP relaxed R1CS
+  fn cap_verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<G>, C: &CompressedCommitment<G>) -> Result<(), NovaError>;
 }
