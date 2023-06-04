@@ -461,7 +461,13 @@ mod tests {
     let snark = res.unwrap();
 
     // verify the SNARK
-    let res = snark.verify(&vk, &z_0);
+    let z_out = circuit.output(&z_0);
+    let io = z_0
+      .clone()
+      .into_iter()
+      .chain(z_out.clone().into_iter())
+      .collect::<Vec<_>>();
+    let res = snark.verify(&vk, &io);
     assert!(res.is_ok());
   }
 }
