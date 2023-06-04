@@ -9,7 +9,6 @@ use crate::traits::{
   snark::{CAPRelaxedR1CSSNARKTrait, ProverKeyTrait, RelaxedR1CSSNARKTrait, VerifierKeyTrait},
   Group,
 };
-
 use crate::{
   bellperson::{
     r1cs::{NovaShape, NovaWitness},
@@ -20,7 +19,6 @@ use crate::{
   spartan::{ProverKey, RelaxedR1CSSNARK, VerifierKey},
   Commitment, CompressedCommitment,
 };
-
 use bellperson::{gadgets::num::AllocatedNum, Circuit, ConstraintSystem, SynthesisError};
 use core::marker::PhantomData;
 use ff::Field;
@@ -222,9 +220,18 @@ mod tests {
   use crate::StepCounterType;
   type G = pasta_curves::pallas::Point;
   type EE = crate::provider::ipa_pc::EvaluationEngine<G>;
+  use crate::spartan::consistency::*;
+  use crate::traits::Group;
   use ::bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
   use core::marker::PhantomData;
   use ff::PrimeField;
+  use generic_array::typenum;
+  use neptune::{
+    sponge::api::{IOPattern, SpongeAPI, SpongeOp},
+    sponge::vanilla::{Mode, Sponge, SpongeTrait},
+    Strength,
+  };
+  use rand::rngs::OsRng;
 
   #[derive(Clone, Debug, Default)]
   struct CubicCircuit<F: PrimeField> {
@@ -317,5 +324,60 @@ mod tests {
 
     // sanity: check the claimed output with a direct computation of the same
     assert_eq!(z_i, vec![<G as Group>::Scalar::from(2460515u64)]);
+  }
+
+  #[test]
+  fn test_consistency_snark() {
+    let pc = Sponge::<<G as Group>::Scalar, typenum::U4>::api_constants(Strength::Standard);
+
+    // witnesses
+    let v = <G as Group>::Scalar::random(&mut OsRng);
+    let s = <G as Group>::Scalar::random(&mut OsRng);
+
+    let mut sponge = Sponge::new_with_constants(&pc, Mode::Simplex);
+    let acc = &mut ();
+
+    let parameter = IOPattern(vec![SpongeOp::Absorb(2), SpongeOp::Squeeze(1)]);
+    sponge.start(parameter, None, acc);
+
+    SpongeAPI::absorb(&mut sponge, 2, &[v, s], acc);
+    let d_out_vec = SpongeAPI::squeeze(&mut sponge, 1, acc);
+    sponge.finish(acc).unwrap();
+
+    let d_out = d_out_vec[0];
+
+    // circuit
+    let circuit: ConsistencyCircuit<<G as Group>::Scalar> =
+      ConsistencyCircuit::new(pc, d_out, v, s);
+
+    // produce keys
+    let (pk, vk) =
+      SpartanSNARK::<G, EE, ConsistencyCircuit<<G as Group>::Scalar>>::setup(circuit.clone())
+        .unwrap();
+
+    // setup inputs
+    let z_0 = vec![<G as Group>::Scalar::zero()];
+
+    // produce a SNARK
+    let res = SpartanSNARK::prove(&pk, circuit.clone(), &z_0);
+    assert!(res.is_ok());
+
+    let z_out = circuit.output(&z_0);
+
+    let snark = res.unwrap();
+
+    // verify the SNARK
+    let io = z_0
+      .clone()
+      .into_iter()
+      .chain(z_out.clone().into_iter())
+      .collect::<Vec<_>>();
+    let res = snark.verify(&vk, &io);
+    assert!(res.is_ok());
+
+    // verifier check
+    let zn = res.unwrap().0;
+    let final_d = zn[0];
+    assert_eq!(final_d, d_out); // d check
   }
 }

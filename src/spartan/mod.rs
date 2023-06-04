@@ -1,5 +1,6 @@
 //! This module implements RelaxedR1CSSNARKTrait and CAPRelaxedR1CSSNARKTrait using Spartan that is generic
 //! over the polynomial commitment and evaluation argument (i.e., a PCS)
+mod consistency;
 pub mod direct;
 mod nizk;
 pub mod polynomial;
