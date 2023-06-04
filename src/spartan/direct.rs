@@ -129,6 +129,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>, C: StepCircuit<G::Scala
     };
 
     let _ = circuit.synthesize(&mut cs);
+
     let (u, w) = cs
       .r1cs_instance_and_witness(&pk.S, &pk.gens)
       .map_err(|_e| NovaError::UnSat)?;
@@ -221,12 +222,9 @@ mod tests {
   use crate::StepCounterType;
   type G = pasta_curves::pallas::Point;
   type EE = crate::provider::ipa_pc::EvaluationEngine<G>;
-  use core::marker::PhantomData;
-  use rand::rngs::OsRng;
-  type G1 = pasta_curves::pallas::Point;
-  type G2 = pasta_curves::vesta::Point;
   use crate::traits::{circuit::StepCircuit, Group};
   use bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
+  use core::marker::PhantomData;
   use ff::PrimeField;
   use generic_array::typenum;
   use neptune::{
@@ -237,18 +235,19 @@ mod tests {
     sponge::vanilla::{Mode, Sponge, SpongeTrait},
     Strength,
   };
+  use rand::rngs::OsRng;
 
   #[derive(Clone, Debug)]
   pub struct ConsistencyCircuit<F: PrimeField> {
     pc: PoseidonConstants<F, typenum::U4>, // arity of PC can be changed as desired
-    d_out: F,
+    d: F,
     v: F,
     s: F,
   }
 
   impl<F: PrimeField> ConsistencyCircuit<F> {
-    pub fn new(pc: PoseidonConstants<F, typenum::U4>, d_out: F, v: F, s: F) -> Self {
-      ConsistencyCircuit { pc, d_out, v, s }
+    pub fn new(pc: PoseidonConstants<F, typenum::U4>, d: F, v: F, s: F) -> Self {
+      ConsistencyCircuit { pc, d, v, s }
     }
   }
 
@@ -261,27 +260,27 @@ mod tests {
     }
 
     fn output(&self, z: &[F]) -> Vec<F> {
-      assert_eq!(z[0], F::from(0));
-      vec![self.d_out]
+      assert_eq!(z[0], self.d);
+      z.to_vec()
     }
 
     fn synthesize<CS>(
       &self,
       cs: &mut CS,
-      _z: &[AllocatedNum<F>],
+      z: &[AllocatedNum<F>],
     ) -> Result<Vec<AllocatedNum<F>>, SynthesisError>
     where
       CS: ConstraintSystem<F>,
-      G1: Group<Base = <G2 as Group>::Scalar>,
-      G2: Group<Base = <G1 as Group>::Scalar>,
     {
+      let d_in = z[0].clone();
+
       //v at index 0
       let alloc_v = AllocatedNum::alloc(cs.namespace(|| "v"), || Ok(self.v))?;
 
       let alloc_s = AllocatedNum::alloc(cs.namespace(|| "s"), || Ok(self.s))?;
 
       //poseidon(v,s) == d
-      let d = {
+      let d_calc = {
         let acc = &mut cs.namespace(|| "d hash circuit");
         let mut sponge = SpongeCircuit::new_with_constants(&self.pc, Mode::Simplex);
 
@@ -310,7 +309,19 @@ mod tests {
         output
       };
 
-      Ok(vec![d])
+      // sanity
+      if d_calc.get_value().is_some() {
+        assert_eq!(d_in.get_value().unwrap(), d_calc.get_value().unwrap());
+      }
+
+      cs.enforce(
+        || format!("d == d"),
+        |z| z + d_in.get_variable(),
+        |z| z + CS::one(),
+        |z| z + d_calc.get_variable(),
+      );
+
+      Ok(vec![d_calc]) // doesn't hugely matter
     }
 
     fn get_counter_type(&self) -> StepCounterType {
@@ -429,11 +440,11 @@ mod tests {
     let d_out_vec = SpongeAPI::squeeze(&mut sponge, 1, acc);
     sponge.finish(acc).unwrap();
 
-    let d_out = d_out_vec[0];
+    let d = d_out_vec[0];
+    println!("d {:#?}", d);
 
     // circuit
-    let circuit: ConsistencyCircuit<<G as Group>::Scalar> =
-      ConsistencyCircuit::new(pc, d_out, v, s);
+    let circuit: ConsistencyCircuit<<G as Group>::Scalar> = ConsistencyCircuit::new(pc, d, v, s);
 
     // produce keys
     let (pk, vk) =
@@ -441,28 +452,16 @@ mod tests {
         .unwrap();
 
     // setup inputs
-    let z_0 = vec![<G as Group>::Scalar::zero()];
+    let z_0 = vec![d];
 
     // produce a SNARK
     let res = SpartanSNARK::prove(&pk, circuit.clone(), &z_0);
     assert!(res.is_ok());
 
-    let z_out = circuit.output(&z_0);
-
     let snark = res.unwrap();
 
     // verify the SNARK
-    let io = z_0
-      .clone()
-      .into_iter()
-      .chain(z_out.clone().into_iter())
-      .collect::<Vec<_>>();
-    let res = snark.verify(&vk, &io);
+    let res = snark.verify(&vk, &z_0);
     assert!(res.is_ok());
-
-    // verifier check
-    let zn = res.unwrap().0;
-    let final_d = zn[0];
-    assert_eq!(final_d, d_out); // d check
   }
 }
