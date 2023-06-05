@@ -319,7 +319,6 @@ mod tests {
     assert_eq!(z_i, vec![<G as Group>::Scalar::from(2460515u64)]);
   }
 
-
   #[derive(Clone, Debug, Default)]
   struct SimpleCircuit<F: PrimeField> {
     _p: PhantomData<F>,
@@ -344,9 +343,7 @@ mod tests {
     ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
       // Computes x * 1 = y, where x and y are respectively the input and output.
       let x = &z[0];
-      let y = AllocatedNum::alloc(cs.namespace(|| "y"), || {
-        Ok(x.get_value().unwrap())
-      })?;
+      let y = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(x.get_value().unwrap()))?;
 
       let useless = AllocatedNum::alloc(cs.namespace(|| "useless"), || Ok(F::one()))?;
 
@@ -372,7 +369,6 @@ mod tests {
     }
   }
 
-
   #[test]
   fn test_spartan_snark_simple() {
     let circuit = SimpleCircuit::default();
@@ -394,7 +390,6 @@ mod tests {
 
     // verify the SNARK
     let io = input
-      .clone()
       .into_iter()
       .chain(output.clone().into_iter())
       .collect::<Vec<_>>();
