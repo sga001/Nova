@@ -560,6 +560,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
     cap_v: &G::Scalar,
     cap_r: &G::Scalar,
   ) -> Result<Self, NovaError> {
+
+    let W = W.pad(&pk.S);
+
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
 
     // sanity check that R1CSShape has certain size characteristics
@@ -784,6 +787,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
       &claim_post_inner,
       &blind_claim_postsc_inner,
     )?;
+
 
     let point_for_cap: Vec<G::Scalar> = vec![G::Scalar::one()]
       .into_iter()

@@ -222,7 +222,12 @@ mod tests {
   use crate::StepCounterType;
   type G = pasta_curves::pallas::Point;
   type EE = crate::provider::ipa_pc::EvaluationEngine<G>;
-  use crate::traits::{circuit::StepCircuit, Group};
+  use crate::traits::{
+    circuit::StepCircuit, 
+    evaluation::GetGeneratorsTrait,
+    commitment::{CommitmentEngineTrait, CommitmentTrait},
+    Group
+  };
   use bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
   use core::marker::PhantomData;
   use ff::PrimeField;
@@ -236,6 +241,7 @@ mod tests {
     Strength,
   };
   use rand::rngs::OsRng;
+
 
   #[derive(Clone, Debug)]
   pub struct ConsistencyCircuit<F: PrimeField> {
@@ -451,11 +457,15 @@ mod tests {
       SpartanSNARK::<G, EE, ConsistencyCircuit<<G as Group>::Scalar>>::setup(circuit.clone())
         .unwrap();
 
+    // produce commitment to v
+    let blind_v = <G as Group>::Scalar::random(&mut OsRng);
+    let com_v = <G as Group>::CE::commit(&pk.pk.gens.get_scalar_gen(), &[v], &blind_v).compress();
+
     // setup inputs
     let z_0 = vec![d];
 
     // produce a SNARK
-    let res = SpartanSNARK::prove(&pk, circuit.clone(), &z_0);
+    let res = SpartanSNARK::cap_prove(&pk, circuit.clone(), &z_0, &com_v, &v, &blind_v);
     assert!(res.is_ok());
 
     let snark = res.unwrap();
@@ -467,7 +477,7 @@ mod tests {
       .into_iter()
       .chain(z_out.clone().into_iter())
       .collect::<Vec<_>>();
-    let res = snark.verify(&vk, &io);
+    let res = snark.cap_verify(&vk, &io, &com_v);
     assert!(res.is_ok());
   }
 
