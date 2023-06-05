@@ -223,10 +223,10 @@ mod tests {
   type G = pasta_curves::pallas::Point;
   type EE = crate::provider::ipa_pc::EvaluationEngine<G>;
   use crate::traits::{
-    circuit::StepCircuit, 
-    evaluation::GetGeneratorsTrait,
+    circuit::StepCircuit,
     commitment::{CommitmentEngineTrait, CommitmentTrait},
-    Group
+    evaluation::GetGeneratorsTrait,
+    Group,
   };
   use bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
   use core::marker::PhantomData;
@@ -241,7 +241,6 @@ mod tests {
     Strength,
   };
   use rand::rngs::OsRng;
-
 
   #[derive(Clone, Debug)]
   pub struct ConsistencyCircuit<F: PrimeField> {
@@ -280,7 +279,7 @@ mod tests {
     {
       let d_in = z[0].clone();
 
-      //v at index 0
+      //v at index 0 (but technically 1 since io is allocated first)
       let alloc_v = AllocatedNum::alloc(cs.namespace(|| "v"), || Ok(self.v))?;
 
       let alloc_s = AllocatedNum::alloc(cs.namespace(|| "s"), || Ok(self.s))?;
@@ -300,19 +299,16 @@ mod tests {
           &mut sponge,
           2,
           &[
-            Elt::Allocated(alloc_v.clone()),
-            Elt::Allocated(alloc_s.clone()),
+            Elt::Allocated(alloc_v),
+            Elt::Allocated(alloc_s),
           ],
           acc,
         );
 
         let output = SpongeAPI::squeeze(&mut sponge, 1, acc);
-
         sponge.finish(acc).unwrap();
-
-        let output =
-          Elt::ensure_allocated(&output[0], &mut acc.namespace(|| "ensure allocated"), true)?;
-        output
+        let out = Elt::ensure_allocated(&output[0], &mut acc.namespace(|| "ensure allocated"), true)?;
+        out
       };
 
       // sanity
@@ -321,7 +317,7 @@ mod tests {
       }
 
       cs.enforce(
-        || format!("d == d"),
+        || "d == d",
         |z| z + d_in.get_variable(),
         |z| z + CS::one(),
         |z| z + d_calc.get_variable(),
@@ -473,9 +469,8 @@ mod tests {
     // verify the SNARK
     let z_out = circuit.output(&z_0);
     let io = z_0
-      .clone()
       .into_iter()
-      .chain(z_out.clone().into_iter())
+      .chain(z_out.into_iter())
       .collect::<Vec<_>>();
     let res = snark.cap_verify(&vk, &io, &com_v);
     assert!(res.is_ok());

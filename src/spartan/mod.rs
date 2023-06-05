@@ -560,7 +560,6 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
     cap_v: &G::Scalar,
     cap_r: &G::Scalar,
   ) -> Result<Self, NovaError> {
-
     let W = W.pad(&pk.S);
 
     let mut transcript = Transcript::new(b"RelaxedR1CSSNARK");
@@ -788,10 +787,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
       &blind_claim_postsc_inner,
     )?;
 
-
-    let point_for_cap: Vec<G::Scalar> = vec![G::Scalar::one()]
+    let point_for_cap: Vec<G::Scalar> = vec![G::Scalar::zero(); r_y.len() - 2]
       .into_iter()
-      .chain(vec![G::Scalar::zero()].repeat(r_y.len() - 2))
+      .chain(vec![G::Scalar::one()])
       .collect();
 
     // prove the correctness of eval_E, eval_W, and the commitment C
@@ -976,9 +974,9 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
       &comm_claim_post_inner,
     )?;
 
-    let point_for_cap: Vec<G::Scalar> = vec![G::Scalar::one()]
+    let point_for_cap: Vec<G::Scalar> = vec![G::Scalar::zero(); r_y.len() - 2]
       .into_iter()
-      .chain(vec![G::Scalar::zero()].repeat(r_y.len() - 2))
+      .chain(vec![G::Scalar::one()])
       .collect();
 
     // verify eval_W and eval_E
