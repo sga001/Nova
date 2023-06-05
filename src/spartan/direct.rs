@@ -109,11 +109,11 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>, C: StepCircuit<G::Scala
 
     let mut cs: ShapeCS<G> = ShapeCS::new();
     let _ = circuit.synthesize(&mut cs);
-    let S = cs.r1cs_shape().pad();
-    let gens = cs.r1cs_gens();
+    let (S, gens) = cs.r1cs_shape();
+    let S_padded = S.pad();
 
-    let pk = ProverKey::new(&gens, &S);
-    let vk = VerifierKey::new(&gens, &S);
+    let pk = ProverKey::new(&gens, &S_padded);
+    let vk = VerifierKey::new(&gens, &S_padded);
 
     let s_pk = SpartanProverKey { gens, S, pk };
     let s_vk = SpartanVerifierKey { vk };
@@ -348,11 +348,18 @@ mod tests {
         Ok(x.get_value().unwrap())
       })?;
 
-      let useless = AllocatedNum::alloc(cs.namespace(|| "useless"), || Ok(F::zero()))?;
+      let useless = AllocatedNum::alloc(cs.namespace(|| "useless"), || Ok(F::one()))?;
+
+      cs.enforce(
+        || "useless is 0",
+        |lc| lc + useless.get_variable(),
+        |lc| lc + CS::one(),
+        |lc| lc + CS::one(),
+      );
 
       cs.enforce(
         || "y = x * 1",
-        |lc| lc + x.get_variable() + useless.get_variable(),
+        |lc| lc + x.get_variable(),
         |lc| lc + CS::one(),
         |lc| lc + y.get_variable(),
       );
@@ -375,29 +382,26 @@ mod tests {
       SpartanSNARK::<G, EE, SimpleCircuit<<G as Group>::Scalar>>::setup(circuit.clone()).unwrap();
 
     // setup inputs
-    let z0 = vec![<G as Group>::Scalar::one()];
-    let mut z_i = z0;
+    let input = vec![<G as Group>::Scalar::one()];
 
     // produce a SNARK
-    let res = SpartanSNARK::prove(&pk, circuit.clone(), &z_i);
+    let res = SpartanSNARK::prove(&pk, circuit.clone(), &input);
     assert!(res.is_ok());
 
-    let z_i_plus_one = circuit.output(&z_i);
+    let output = circuit.output(&input);
 
     let snark = res.unwrap();
 
     // verify the SNARK
-    let io = z_i
+    let io = input
       .clone()
       .into_iter()
-      .chain(z_i_plus_one.clone().into_iter())
+      .chain(output.clone().into_iter())
       .collect::<Vec<_>>();
     let res = snark.verify(&vk, &io);
     assert!(res.is_ok());
 
-    z_i = z_i_plus_one.clone();
-
     // sanity: check the claimed output with a direct computation of the same
-    assert_eq!(z_i, vec![<G as Group>::Scalar::one()]);
+    assert_eq!(output, vec![<G as Group>::Scalar::one()]);
   }
 }
