@@ -318,4 +318,86 @@ mod tests {
     // sanity: check the claimed output with a direct computation of the same
     assert_eq!(z_i, vec![<G as Group>::Scalar::from(2460515u64)]);
   }
+
+
+  #[derive(Clone, Debug, Default)]
+  struct SimpleCircuit<F: PrimeField> {
+    _p: PhantomData<F>,
+  }
+
+  impl<F> StepCircuit<F> for SimpleCircuit<F>
+  where
+    F: PrimeField,
+  {
+    fn arity(&self) -> usize {
+      1
+    }
+
+    fn get_counter_type(&self) -> StepCounterType {
+      StepCounterType::Incremental
+    }
+
+    fn synthesize<CS: ConstraintSystem<F>>(
+      &self,
+      cs: &mut CS,
+      z: &[AllocatedNum<F>],
+    ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+      // Computes x * 1 = y, where x and y are respectively the input and output.
+      let x = &z[0];
+      let y = AllocatedNum::alloc(cs.namespace(|| "y"), || {
+        Ok(x.get_value().unwrap())
+      })?;
+
+      let useless = AllocatedNum::alloc(cs.namespace(|| "useless"), || Ok(F::zero()))?;
+
+      cs.enforce(
+        || "y = x * 1",
+        |lc| lc + x.get_variable() + useless.get_variable(),
+        |lc| lc + CS::one(),
+        |lc| lc + y.get_variable(),
+      );
+
+      Ok(vec![y])
+    }
+
+    fn output(&self, z: &[F]) -> Vec<F> {
+      vec![z[0]]
+    }
+  }
+
+
+  #[test]
+  fn test_spartan_snark_simple() {
+    let circuit = SimpleCircuit::default();
+
+    // produce keys
+    let (pk, vk) =
+      SpartanSNARK::<G, EE, SimpleCircuit<<G as Group>::Scalar>>::setup(circuit.clone()).unwrap();
+
+    // setup inputs
+    let z0 = vec![<G as Group>::Scalar::one()];
+    let mut z_i = z0;
+
+    // produce a SNARK
+    let res = SpartanSNARK::prove(&pk, circuit.clone(), &z_i);
+    assert!(res.is_ok());
+
+    let z_i_plus_one = circuit.output(&z_i);
+
+    let snark = res.unwrap();
+
+    // verify the SNARK
+    let io = z_i
+      .clone()
+      .into_iter()
+      .chain(z_i_plus_one.clone().into_iter())
+      .collect::<Vec<_>>();
+    let res = snark.verify(&vk, &io);
+    assert!(res.is_ok());
+
+    z_i = z_i_plus_one.clone();
+
+    // sanity: check the claimed output with a direct computation of the same
+    assert_eq!(z_i, vec![<G as Group>::Scalar::one()]);
+  }
 }
