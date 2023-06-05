@@ -131,7 +131,7 @@ where
     );
     let mut cs: ShapeCS<G1> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
-    let (r1cs_shape_primary, r1cs_gens_primary) = (cs.r1cs_shape(), cs.r1cs_gens());
+    let (r1cs_shape_primary, r1cs_gens_primary) = cs.r1cs_shape();
     let r1cs_shape_padded_primary = r1cs_shape_primary.pad();
 
     // Initialize gens for the secondary
@@ -143,7 +143,7 @@ where
     );
     let mut cs: ShapeCS<G2> = ShapeCS::new();
     let _ = circuit_secondary.synthesize(&mut cs);
-    let (r1cs_shape_secondary, r1cs_gens_secondary) = (cs.r1cs_shape(), cs.r1cs_gens());
+    let (r1cs_shape_secondary, r1cs_gens_secondary) = cs.r1cs_shape();
     let r1cs_shape_padded_secondary = r1cs_shape_secondary.pad();
 
     Ok(Self {

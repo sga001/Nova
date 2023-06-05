@@ -173,8 +173,7 @@ mod tests {
     // First create the shape
     let mut cs: ShapeCS<G> = ShapeCS::new();
     let _ = synthesize_tiny_r1cs_bellperson(&mut cs, None);
-    let shape = cs.r1cs_shape();
-    let gens = cs.r1cs_gens();
+    let (shape, gens) = cs.r1cs_shape();
     let ro_consts =
       <<G as Group>::RO as ROTrait<<G as Group>::Base, <G as Group>::Scalar>>::Constants::new();
 
