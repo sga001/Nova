@@ -26,9 +26,7 @@ pub trait NovaWitness<G: Group> {
 /// `NovaShape` provides methods for acquiring `R1CSShape` and `R1CSGens` from implementers.
 pub trait NovaShape<G: Group> {
   /// Return an appropriate `R1CSShape` struct.
-  fn r1cs_shape(&self) -> R1CSShape<G>;
-  /// Return an appropriate `R1CSGens` struct.
-  fn r1cs_gens(&self) -> R1CSGens<G>;
+  fn r1cs_shape(&self) -> (R1CSShape<G>, R1CSGens<G>);
 }
 
 impl<G: Group> NovaWitness<G> for SatisfyingAssignment<G>
@@ -55,7 +53,7 @@ impl<G: Group> NovaShape<G> for ShapeCS<G>
 where
   G::Scalar: PrimeField,
 {
-  fn r1cs_shape(&self) -> R1CSShape<G> {
+  fn r1cs_shape(&self) -> (R1CSShape<G>, R1CSGens<G>) {
     let mut A: Vec<(usize, usize, G::Scalar)> = Vec::new();
     let mut B: Vec<(usize, usize, G::Scalar)> = Vec::new();
     let mut C: Vec<(usize, usize, G::Scalar)> = Vec::new();
@@ -85,11 +83,9 @@ where
       res.unwrap()
     };
 
-    S
-  }
+    let gens = R1CSGens::<G>::new(self.num_constraints(), self.num_aux());
 
-  fn r1cs_gens(&self) -> R1CSGens<G> {
-    R1CSGens::<G>::new(self.num_constraints(), self.num_aux())
+    (S, gens)
   }
 }
 

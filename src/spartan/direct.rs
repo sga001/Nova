@@ -107,11 +107,11 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>, C: StepCircuit<G::Scala
 
     let mut cs: ShapeCS<G> = ShapeCS::new();
     let _ = circuit.synthesize(&mut cs);
-    let S = cs.r1cs_shape().pad();
-    let gens = cs.r1cs_gens();
+    let (S, gens) = cs.r1cs_shape();
+    let S_padded = S.pad();
 
-    let pk = ProverKey::new(&gens, &S);
-    let vk = VerifierKey::new(&gens, &S);
+    let pk = ProverKey::new(&gens, &S_padded);
+    let vk = VerifierKey::new(&gens, &S_padded);
 
     let s_pk = SpartanProverKey { gens, S, pk };
     let s_vk = SpartanVerifierKey { vk };
@@ -469,5 +469,86 @@ mod tests {
       .collect::<Vec<_>>();
     let res = snark.verify(&vk, &io);
     assert!(res.is_ok());
+  }
+
+  #[derive(Clone, Debug, Default)]
+  struct SimpleCircuit<F: PrimeField> {
+    _p: PhantomData<F>,
+  }
+
+  impl<F> StepCircuit<F> for SimpleCircuit<F>
+  where
+    F: PrimeField,
+  {
+    fn arity(&self) -> usize {
+      1
+    }
+
+    fn get_counter_type(&self) -> StepCounterType {
+      StepCounterType::Incremental
+    }
+
+    fn synthesize<CS: ConstraintSystem<F>>(
+      &self,
+      cs: &mut CS,
+      z: &[AllocatedNum<F>],
+    ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+      // Computes x * 1 = y, where x and y are respectively the input and output.
+      let x = &z[0];
+      let y = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(x.get_value().unwrap()))?;
+
+      let useless = AllocatedNum::alloc(cs.namespace(|| "useless"), || Ok(F::one()))?;
+
+      cs.enforce(
+        || "useless is 0",
+        |lc| lc + useless.get_variable(),
+        |lc| lc + CS::one(),
+        |lc| lc + CS::one(),
+      );
+
+      cs.enforce(
+        || "y = x * 1",
+        |lc| lc + x.get_variable(),
+        |lc| lc + CS::one(),
+        |lc| lc + y.get_variable(),
+      );
+
+      Ok(vec![y])
+    }
+
+    fn output(&self, z: &[F]) -> Vec<F> {
+      vec![z[0]]
+    }
+  }
+
+  #[test]
+  fn test_spartan_snark_simple() {
+    let circuit = SimpleCircuit::default();
+
+    // produce keys
+    let (pk, vk) =
+      SpartanSNARK::<G, EE, SimpleCircuit<<G as Group>::Scalar>>::setup(circuit.clone()).unwrap();
+
+    // setup inputs
+    let input = vec![<G as Group>::Scalar::one()];
+
+    // produce a SNARK
+    let res = SpartanSNARK::prove(&pk, circuit.clone(), &input);
+    assert!(res.is_ok());
+
+    let output = circuit.output(&input);
+
+    let snark = res.unwrap();
+
+    // verify the SNARK
+    let io = input
+      .into_iter()
+      .chain(output.clone().into_iter())
+      .collect::<Vec<_>>();
+    let res = snark.verify(&vk, &io);
+    assert!(res.is_ok());
+
+    // sanity: check the claimed output with a direct computation of the same
+    assert_eq!(output, vec![<G as Group>::Scalar::one()]);
   }
 }
