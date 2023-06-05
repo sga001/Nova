@@ -9,7 +9,6 @@ use crate::traits::{
   snark::{CAPRelaxedR1CSSNARKTrait, ProverKeyTrait, RelaxedR1CSSNARKTrait, VerifierKeyTrait},
   Group,
 };
-
 use crate::{
   bellperson::{
     r1cs::{NovaShape, NovaWitness},
@@ -20,7 +19,6 @@ use crate::{
   spartan::{ProverKey, RelaxedR1CSSNARK, VerifierKey},
   Commitment, CompressedCommitment,
 };
-
 use bellperson::{gadgets::num::AllocatedNum, Circuit, ConstraintSystem, SynthesisError};
 use core::marker::PhantomData;
 use ff::Field;
@@ -131,6 +129,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>, C: StepCircuit<G::Scala
     };
 
     let _ = circuit.synthesize(&mut cs);
+
     let (u, w) = cs
       .r1cs_instance_and_witness(&pk.S, &pk.gens)
       .map_err(|_e| NovaError::UnSat)?;
@@ -218,13 +217,117 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>, C: StepCircuit<G::Scala
 
 #[cfg(test)]
 mod tests {
+
   use super::*;
   use crate::StepCounterType;
   type G = pasta_curves::pallas::Point;
   type EE = crate::provider::ipa_pc::EvaluationEngine<G>;
-  use ::bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
+  use crate::traits::{circuit::StepCircuit, Group};
+  use bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
   use core::marker::PhantomData;
   use ff::PrimeField;
+  use generic_array::typenum;
+  use neptune::{
+    circuit2::Elt,
+    poseidon::PoseidonConstants,
+    sponge::api::{IOPattern, SpongeAPI, SpongeOp},
+    sponge::circuit::SpongeCircuit,
+    sponge::vanilla::{Mode, Sponge, SpongeTrait},
+    Strength,
+  };
+  use rand::rngs::OsRng;
+
+  #[derive(Clone, Debug)]
+  pub struct ConsistencyCircuit<F: PrimeField> {
+    pc: PoseidonConstants<F, typenum::U4>, // arity of PC can be changed as desired
+    d: F,
+    v: F,
+    s: F,
+  }
+
+  impl<F: PrimeField> ConsistencyCircuit<F> {
+    pub fn new(pc: PoseidonConstants<F, typenum::U4>, d: F, v: F, s: F) -> Self {
+      ConsistencyCircuit { pc, d, v, s }
+    }
+  }
+
+  impl<F> StepCircuit<F> for ConsistencyCircuit<F>
+  where
+    F: PrimeField,
+  {
+    fn arity(&self) -> usize {
+      1
+    }
+
+    fn output(&self, z: &[F]) -> Vec<F> {
+      assert_eq!(z[0], self.d);
+      z.to_vec()
+    }
+
+    fn synthesize<CS>(
+      &self,
+      cs: &mut CS,
+      z: &[AllocatedNum<F>],
+    ) -> Result<Vec<AllocatedNum<F>>, SynthesisError>
+    where
+      CS: ConstraintSystem<F>,
+    {
+      let d_in = z[0].clone();
+
+      //v at index 0
+      let alloc_v = AllocatedNum::alloc(cs.namespace(|| "v"), || Ok(self.v))?;
+
+      let alloc_s = AllocatedNum::alloc(cs.namespace(|| "s"), || Ok(self.s))?;
+
+      //poseidon(v,s) == d
+      let d_calc = {
+        let acc = &mut cs.namespace(|| "d hash circuit");
+        let mut sponge = SpongeCircuit::new_with_constants(&self.pc, Mode::Simplex);
+
+        sponge.start(
+          IOPattern(vec![SpongeOp::Absorb(2), SpongeOp::Squeeze(1)]),
+          None,
+          acc,
+        );
+
+        SpongeAPI::absorb(
+          &mut sponge,
+          2,
+          &[
+            Elt::Allocated(alloc_v.clone()),
+            Elt::Allocated(alloc_s.clone()),
+          ],
+          acc,
+        );
+
+        let output = SpongeAPI::squeeze(&mut sponge, 1, acc);
+
+        sponge.finish(acc).unwrap();
+
+        let output =
+          Elt::ensure_allocated(&output[0], &mut acc.namespace(|| "ensure allocated"), true)?;
+        output
+      };
+
+      // sanity
+      if d_calc.get_value().is_some() {
+        assert_eq!(d_in.get_value().unwrap(), d_calc.get_value().unwrap());
+      }
+
+      cs.enforce(
+        || format!("d == d"),
+        |z| z + d_in.get_variable(),
+        |z| z + CS::one(),
+        |z| z + d_calc.get_variable(),
+      );
+
+      Ok(vec![d_calc]) // doesn't hugely matter
+    }
+
+    fn get_counter_type(&self) -> StepCounterType {
+      StepCounterType::Incremental
+    }
+  }
 
   #[derive(Clone, Debug, Default)]
   struct CubicCircuit<F: PrimeField> {
@@ -317,6 +420,55 @@ mod tests {
 
     // sanity: check the claimed output with a direct computation of the same
     assert_eq!(z_i, vec![<G as Group>::Scalar::from(2460515u64)]);
+  }
+
+  #[test]
+  fn test_consistency_snark() {
+    let pc = Sponge::<<G as Group>::Scalar, typenum::U4>::api_constants(Strength::Standard);
+
+    // witnesses
+    let v = <G as Group>::Scalar::random(&mut OsRng);
+    let s = <G as Group>::Scalar::random(&mut OsRng);
+
+    let mut sponge = Sponge::new_with_constants(&pc, Mode::Simplex);
+    let acc = &mut ();
+
+    let parameter = IOPattern(vec![SpongeOp::Absorb(2), SpongeOp::Squeeze(1)]);
+    sponge.start(parameter, None, acc);
+
+    SpongeAPI::absorb(&mut sponge, 2, &[v, s], acc);
+    let d_out_vec = SpongeAPI::squeeze(&mut sponge, 1, acc);
+    sponge.finish(acc).unwrap();
+
+    let d = d_out_vec[0];
+    println!("d {:#?}", d);
+
+    // circuit
+    let circuit: ConsistencyCircuit<<G as Group>::Scalar> = ConsistencyCircuit::new(pc, d, v, s);
+
+    // produce keys
+    let (pk, vk) =
+      SpartanSNARK::<G, EE, ConsistencyCircuit<<G as Group>::Scalar>>::setup(circuit.clone())
+        .unwrap();
+
+    // setup inputs
+    let z_0 = vec![d];
+
+    // produce a SNARK
+    let res = SpartanSNARK::prove(&pk, circuit.clone(), &z_0);
+    assert!(res.is_ok());
+
+    let snark = res.unwrap();
+
+    // verify the SNARK
+    let z_out = circuit.output(&z_0);
+    let io = z_0
+      .clone()
+      .into_iter()
+      .chain(z_out.clone().into_iter())
+      .collect::<Vec<_>>();
+    let res = snark.verify(&vk, &io);
+    assert!(res.is_ok());
   }
 
   #[derive(Clone, Debug, Default)]
