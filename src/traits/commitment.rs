@@ -49,6 +49,9 @@ pub trait CommitmentGensTrait<G: Group>:
 
   /// Returns the blinding generator of the commitment
   fn get_blinding_gen(&self) -> G::PreprocessedGroupElement;
+
+  /// Converts a commitment into generators (with no blinding generator)
+  fn from_commitments(com: &[Self::Commitment]) -> Self;
 }
 
 /// Defines basic operations on commitments
@@ -104,6 +107,9 @@ pub trait CommitmentTrait<G: Group>:
 
   /// Returns the coordinate representation of the commitment
   fn to_coordinates(&self) -> (G::Base, G::Base, bool);
+
+  /// Reinterpret as generator
+  fn reinterpret_as_generator(&self) -> G::PreprocessedGroupElement;
 }
 
 /// This trait defines the behavior of a compressed commitment

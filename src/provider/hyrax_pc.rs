@@ -2,33 +2,22 @@
 #![allow(clippy::too_many_arguments)]
 use crate::{
   errors::NovaError,
+  provider::ipa_pc::{InnerProductArgument, InnerProductInstance, InnerProductWitness},
   provider::pedersen::CommitmentGensExtTrait,
-  provider::ipa_pc::{InnerProductWitness, InnerProductArgument, InnerProductInstance},
   spartan::polynomial::{EqPolynomial, MultilinearPolynomial},
   traits::{
     commitment::{
-      CommitmentEngineTrait, CommitmentGensTrait, CompressedCommitmentTrait, CommitmentTrait
+      CommitmentEngineTrait, CommitmentGensTrait, CommitmentTrait, CompressedCommitmentTrait,
     },
     evaluation::GetGeneratorsTrait,
-    AppendToTranscriptTrait, Group 
+    AppendToTranscriptTrait, Group,
   },
-  CommitmentGens, CompressedCommitment, Commitment
+  Commitment, CommitmentGens, CompressedCommitment,
 };
 use ff::Field;
 use merlin::Transcript;
 use rand::rngs::OsRng;
 use rayon::prelude::*;
-
-fn inner_product<T>(a: &[T], b: &[T]) -> T
-where
-  T: Field + Send + Sync,
-{
-  assert_eq!(a.len(), b.len());
-  (0..a.len())
-    .into_par_iter()
-    .map(|i| a[i] * b[i])
-    .reduce(T::zero, |x, y| x + y)
-}
 
 /// Structure that holds the blinds of a PC
 pub struct PolyCommitBlinds<G: Group> {
@@ -46,22 +35,20 @@ pub struct PolyCommit<G: Group> {
 impl<G: Group> AppendToTranscriptTrait for PolyCommit<G> {
   fn append_to_transcript(&self, label: &'static [u8], transcript: &mut Transcript) {
     transcript.append_message(label, b"poly_commitment_begin");
-    for c in self.comm {
+    for c in &self.comm {
       c.append_to_transcript(b"poly_commitment_share", transcript);
     }
     transcript.append_message(label, b"poly_commitment_end");
   }
 }
 
-
 /// Hyrax PC generators and functions to commit and prove evaluation
 pub struct HyraxPC<G: Group> {
   gens_v: CommitmentGens<G>, // generator for vectors
-  gens_s: CommitmentGens<G>, // generator for scalars (eval) 
+  gens_s: CommitmentGens<G>, // generator for scalars (eval)
 }
 
-
-impl <G: Group> GetGeneratorsTrait<G> for HyraxPC<G> {
+impl<G: Group> GetGeneratorsTrait<G> for HyraxPC<G> {
   fn get_scalar_gen(&self) -> &CommitmentGens<G> {
     &self.gens_s
   }
@@ -71,8 +58,7 @@ impl <G: Group> GetGeneratorsTrait<G> for HyraxPC<G> {
   }
 }
 
-
-impl<G: Group> HyraxPC<G> 
+impl<G: Group> HyraxPC<G>
 where
   G: Group,
   CommitmentGens<G>: CommitmentGensExtTrait<G, CE = G::CE>,
@@ -81,11 +67,16 @@ where
   pub fn new(num_vars: usize, label: &'static [u8]) -> Self {
     let (_left, right) = EqPolynomial::<G::Scalar>::compute_factored_lens(num_vars);
     let gens_v = CommitmentGens::<G>::new(label, right);
-    let gens_s = CommitmentGens::<G>::new_with_blinding_gen(b"gens_s", 1, &gens_v.get_blinding_gen());
+    let gens_s =
+      CommitmentGens::<G>::new_with_blinding_gen(b"gens_s", 1, &gens_v.get_blinding_gen());
     HyraxPC { gens_v, gens_s }
   }
 
-  fn commit_inner(&self, poly: &MultilinearPolynomial<G::Scalar>, blinds: &[G::Scalar]) -> PolyCommit<G> {
+  fn commit_inner(
+    &self,
+    poly: &MultilinearPolynomial<G::Scalar>,
+    blinds: &[G::Scalar],
+  ) -> PolyCommit<G> {
     let L_size = blinds.len();
     let R_size = poly.len() / L_size;
 
@@ -94,15 +85,23 @@ where
     let comm = (0..L_size)
       .into_par_iter()
       .map(|i| {
-        G::CE::commit(&self.gens_v, &poly.get_Z()[R_size * i..R_size * (i + 1)], &blinds[i]).compress()
+        G::CE::commit(
+          &self.gens_v,
+          &poly.get_Z()[R_size * i..R_size * (i + 1)],
+          &blinds[i],
+        )
+        .compress()
       })
-    .collect();
+      .collect();
 
     PolyCommit { comm }
   }
 
-  
-  fn commit(&self, poly: &MultilinearPolynomial<G::Scalar>) -> (PolyCommit<G>, PolyCommitBlinds<G>) {
+  /// Commits to a multilinear polynomial and returns commitment and blind
+  pub fn commit(
+    &self,
+    poly: &MultilinearPolynomial<G::Scalar>,
+  ) -> (PolyCommit<G>, PolyCommitBlinds<G>) {
     let n = poly.len();
     let ell = poly.get_num_vars();
     assert_eq!(n, (2usize).pow(ell as u32));
@@ -112,27 +111,37 @@ where
     let R_size = (2usize).pow(right_num_vars as u32);
     assert_eq!(L_size * R_size, n);
 
-    let blinds = PolyCommitBlinds { blinds: (0..L_size).map(|_| G::Scalar::random(&mut OsRng) ).collect() };
+    let blinds = PolyCommitBlinds {
+      blinds: (0..L_size).map(|_| G::Scalar::random(&mut OsRng)).collect(),
+    };
 
     (self.commit_inner(poly, &blinds.blinds), blinds)
   }
 
-  fn prove_eval(
-    &self, 
+  /// Proves the evaluation of polynomial at a random point r
+  pub fn prove_eval(
+    &self,
     poly: &MultilinearPolynomial<G::Scalar>,
     poly_com: &PolyCommit<G>,
     blinds: &PolyCommitBlinds<G>,
     r: &[G::Scalar],      // point at which the polynomial is evaluated
     Zr: &G::Scalar,       // evaluation of poly(r)
     blind_Zr: &G::Scalar, // blind for Zr
-    transcript: &mut Transcript
-  ) -> Result<(InnerProductInstance<G>, InnerProductWitness<G>, InnerProductArgument<G>), NovaError> {
+    transcript: &mut Transcript,
+  ) -> Result<
+    (
+      InnerProductInstance<G>,
+      InnerProductWitness<G>,
+      InnerProductArgument<G>,
+    ),
+    NovaError,
+  > {
     transcript.append_message(b"protocol-name", b"polynomial evaluation proof");
     poly_com.append_to_transcript(b"poly_com", transcript);
 
     // assert vectors are of the right size
     assert_eq!(poly.get_num_vars(), r.len());
-    
+
     let (left_num_vars, right_num_vars) = EqPolynomial::<G::Scalar>::compute_factored_lens(r.len());
     let L_size = (2usize).pow(left_num_vars as u32);
     let R_size = (2usize).pow(right_num_vars as u32);
@@ -148,8 +157,10 @@ where
     // compute the vector underneath L*Z and the L*blinds
     // compute vector-matrix product between L and Z viewed as a matrix
     let LZ = poly.bound(&L);
-    let LZ_blind: G::Scalar = (0..L.len()).map(|i| blinds.blinds[i] * L[i]).fold(G::Scalar::one(), |acc, item| acc * item);
-    
+    let LZ_blind: G::Scalar = (0..L.len())
+      .map(|i| blinds.blinds[i] * L[i])
+      .fold(G::Scalar::one(), |acc, item| acc * item);
+
     // Translation between this stuff and IPA
     // LZ = x_vec
     // LZ_blind = r_x
@@ -157,23 +168,30 @@ where
     // blind_Zr = r_y
     // R = a_vec
 
-    // Commit to LZ and Zr 
+    // Commit to LZ and Zr
     let com_LZ = G::CE::commit(&self.gens_v, &LZ, &LZ_blind);
     let com_Zr = G::CE::commit(&self.gens_s, &[Zr.clone()], blind_Zr);
 
     // a dot product argument (IPA) of size R_size
     let ipa_instance = InnerProductInstance::<G>::new(&com_LZ, &R, &com_Zr);
     let ipa_witness = InnerProductWitness::<G>::new(&LZ, &LZ_blind, Zr, blind_Zr);
-    let ipa = InnerProductArgument::<G>::prove(&self.gens_v, &self.gens_s, &ipa_instance, &ipa_witness, transcript)?;
-   
+    let ipa = InnerProductArgument::<G>::prove(
+      &self.gens_v,
+      &self.gens_s,
+      &ipa_instance,
+      &ipa_witness,
+      transcript,
+    )?;
+
     Ok((ipa_instance, ipa_witness, ipa))
   }
 
+  /// Verifies the proof showing the evaluation of a committed polynomial at a random point
   pub fn verify_eval(
     &self,
     r: &[G::Scalar], // point at which the polynomial was evaluated
     poly_com: &PolyCommit<G>,
-    ipa_instance: &InnerProductInstance<G>,
+    com_Zr: &Commitment<G>, // commitment to evaluation
     ipa: &InnerProductArgument<G>,
     transcript: &mut Transcript,
   ) -> Result<(), NovaError> {
@@ -185,9 +203,22 @@ where
     let (L, R) = eq.compute_factored_evals();
 
     // compute a weighted sum of commitments and L
-    let C_decompressed: Vec<Commitment<G>> = poly_com.comm.iter().map(|pt| pt.decompress().unwrap()).collect();
+    let C_decompressed: Vec<Commitment<G>> = poly_com
+      .comm
+      .iter()
+      .map(|pt| pt.decompress().unwrap())
+      .collect();
+    let gens = CommitmentGens::<G>::from_commitments(&C_decompressed);
+    let com_LZ = G::CE::commit(&gens, &L, &G::Scalar::zero()); // computes MSM of commitment and L
 
-    let C_LZ = G::vartime_multiscalar_mul(&L, &C_decompressed).compress();
-    ipa.verify(&self.gens_v, &self.gens_s, L.len(), ipa_instance, transcript)
+    let ipa_instance = InnerProductInstance::<G>::new(&com_LZ, &R, &com_Zr);
+
+    ipa.verify(
+      &self.gens_v,
+      &self.gens_s,
+      L.len(),
+      &ipa_instance,
+      transcript,
+    )
   }
 }

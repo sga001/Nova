@@ -4,8 +4,8 @@
 //! `RO` traits with Poseidon
 //! `EvaluationEngine` with an IPA-based polynomial evaluation argument
 
+pub mod hyrax_pc;
 pub mod ipa_pc;
 pub mod pasta;
 pub mod pedersen;
 pub mod poseidon;
-pub mod hyrax_pc;
