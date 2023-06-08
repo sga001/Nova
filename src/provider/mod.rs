@@ -8,3 +8,4 @@ pub mod ipa_pc;
 pub mod pasta;
 pub mod pedersen;
 pub mod poseidon;
+pub mod hyrax_pc;

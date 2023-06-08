@@ -30,8 +30,12 @@ pub struct EvaluationGens<G: Group> {
 }
 
 impl<G: Group> GetGeneratorsTrait<G> for EvaluationGens<G> {
-  fn get_scalar_gen(&self) -> CommitmentGens<G> {
-    self.gens_s.clone()
+  fn get_scalar_gen(&self) -> &CommitmentGens<G> {
+    &self.gens_s
+  }
+
+  fn get_vector_gen(&self) -> &CommitmentGens<G> {
+    &self.gens_v
   }
 }
 
