@@ -43,15 +43,32 @@ impl<Scalar: PrimeField> EqPolynomial<Scalar> {
     }
     evals
   }
+
+  pub fn compute_factored_lens(ell: usize) -> (usize, usize) {
+    (ell / 2, ell - ell / 2)
+  }
+
+  pub fn compute_factored_evals(&self) -> (Vec<Scalar>, Vec<Scalar>) {
+    let ell = self.r.len();
+    let (left_num_vars, _right_num_vars) = EqPolynomial::<Scalar>::compute_factored_lens(ell);
+
+    let L = EqPolynomial::new(self.r[..left_num_vars].to_vec()).evals();
+    let R = EqPolynomial::new(self.r[left_num_vars..ell].to_vec()).evals();
+
+    (L, R)
+  }
 }
 
 #[derive(Debug)]
-pub(crate) struct MultilinearPolynomial<Scalar: PrimeField> {
+/// A multilinear polynomial with num_vars and 2^num_vars entries
+pub struct MultilinearPolynomial<Scalar: PrimeField> {
   num_vars: usize, // the number of variables in the multilinear polynomial
   Z: Vec<Scalar>,  // evaluations of the polynomial in all the 2^num_vars Boolean inputs
 }
 
 impl<Scalar: PrimeField> MultilinearPolynomial<Scalar> {
+  /// Creates a new multilinear polynomial from a vector of scalars
+  /// representing the evaluations of the polynomial
   pub fn new(Z: Vec<Scalar>) -> Self {
     assert_eq!(Z.len(), (2_usize).pow((Z.len() as f64).log2() as u32));
     MultilinearPolynomial {
@@ -60,14 +77,43 @@ impl<Scalar: PrimeField> MultilinearPolynomial<Scalar> {
     }
   }
 
+  /// Returns the number of variables
   pub fn get_num_vars(&self) -> usize {
     self.num_vars
   }
 
+  /// Returns the underlying vector of scalars
+  pub fn get_Z(&self) -> &[Scalar] {
+    &self.Z
+  }
+
+  /// Returns the length of the polynomial
   pub fn len(&self) -> usize {
     self.Z.len()
   }
 
+  /// Returns whether polynomial is empty
+  pub fn is_empty(&self) -> bool {
+    self.Z.len() == 0
+  }
+
+  /// TBD
+  pub fn bound(&self, L: &[Scalar]) -> Vec<Scalar> {
+    let (left_num_vars, right_num_vars) =
+      EqPolynomial::<Scalar>::compute_factored_lens(self.num_vars);
+    let L_size = (2_usize).pow(left_num_vars as u32);
+    let R_size = (2_usize).pow(right_num_vars as u32);
+
+    (0..R_size)
+      .map(|i| {
+        (0..L_size)
+          .map(|j| L[j] * self.Z[j * R_size + i])
+          .fold(Scalar::zero(), |x, y| x + y)
+      })
+      .collect()
+  }
+
+  /// TBD
   pub fn bound_poly_var_top(&mut self, r: &Scalar) {
     let n = self.len() / 2;
 
@@ -85,7 +131,7 @@ impl<Scalar: PrimeField> MultilinearPolynomial<Scalar> {
     self.num_vars -= 1;
   }
 
-  // returns Z(r) in O(n) time
+  /// Returns Z(r) in O(n) time
   pub fn evaluate(&self, r: &[Scalar]) -> Scalar {
     // r must have a value for each variable
     assert_eq!(r.len(), self.get_num_vars());

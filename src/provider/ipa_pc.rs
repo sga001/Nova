@@ -30,8 +30,12 @@ pub struct EvaluationGens<G: Group> {
 }
 
 impl<G: Group> GetGeneratorsTrait<G> for EvaluationGens<G> {
-  fn get_scalar_gen(&self) -> CommitmentGens<G> {
-    self.gens_s.clone()
+  fn get_scalar_gen(&self) -> &CommitmentGens<G> {
+    &self.gens_s
+  }
+
+  fn get_vector_gen(&self) -> &CommitmentGens<G> {
+    &self.gens_v
   }
 }
 
@@ -196,12 +200,15 @@ where
     .reduce(T::zero, |x, y| x + y)
 }
 
-/// An inner product instance consists of a commitment to a vector `a` and another vector `b`
+/// An inner product instance consists of a commitment to a vector `x` and another vector `a`
 /// and the claim that y = <x, a>.
 pub struct InnerProductInstance<G: Group> {
-  comm_x_vec: Commitment<G>,
-  a_vec: Vec<G::Scalar>,
-  comm_y: Commitment<G>, // commitment to scalar c
+  /// Commitment to vector
+  pub comm_x_vec: Commitment<G>,
+  /// Public vector
+  pub a_vec: Vec<G::Scalar>,
+  /// Commitment to scalar
+  pub comm_y: Commitment<G>, // commitment to scalar c
 }
 
 impl<G: Group> InnerProductInstance<G> {

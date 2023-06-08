@@ -69,11 +69,11 @@ pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
 impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> ProverKeyTrait<G> for ProverKey<G, EE> {
   fn new(gens: &R1CSGens<G>, S: &R1CSShape<G>) -> Self {
     let gens = EE::setup(&gens.gens);
-    let scalar_gen = &gens.get_scalar_gen();
+    let scalar_gen = gens.get_scalar_gen().clone();
 
     ProverKey {
       gens,
-      sumcheck_gens: SumcheckGens::<G>::new(b"gens_s", scalar_gen),
+      sumcheck_gens: SumcheckGens::<G>::new(b"gens_s", &scalar_gen),
       S: S.clone(),
     }
   }
@@ -93,11 +93,11 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> VerifierKeyTrait<G>
 {
   fn new(gens: &R1CSGens<G>, S: &R1CSShape<G>) -> Self {
     let gens = EE::setup(&gens.gens);
-    let scalar_gen = &gens.get_scalar_gen();
+    let scalar_gen = gens.get_scalar_gen().clone();
 
     VerifierKey {
       gens,
-      sumcheck_gens: SumcheckGens::<G>::new(b"gens_s", scalar_gen),
+      sumcheck_gens: SumcheckGens::<G>::new(b"gens_s", &scalar_gen),
       S: S.clone(),
     }
   }
@@ -244,7 +244,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     // Evaluate E at r_x. We do this to compute blind and claim of outer sumcheck
     let eval_E = MultilinearPolynomial::new(W.E.clone()).evaluate(&r_x);
     let blind_eval_E = G::Scalar::random(&mut OsRng);
-    let comm_eval_E = G::CE::commit(&pk.gens.get_scalar_gen(), &[eval_E], &blind_eval_E).compress();
+    let comm_eval_E = G::CE::commit(pk.gens.get_scalar_gen(), &[eval_E], &blind_eval_E).compress();
     comm_eval_E.append_to_transcript(b"comm_eval_E", &mut transcript);
 
     let blind_expected_claim_outer =
@@ -342,7 +342,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
 
     let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
     let blind_eval_W = G::Scalar::random(&mut OsRng);
-    let comm_eval_W = G::CE::commit(&pk.gens.get_scalar_gen(), &[eval_W], &blind_eval_W).compress();
+    let comm_eval_W = G::CE::commit(pk.gens.get_scalar_gen(), &[eval_W], &blind_eval_W).compress();
     comm_eval_W.append_to_transcript(b"comm_eval_W", &mut transcript);
 
     // prove the final step of inner sumcheck
@@ -351,7 +351,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
     let claim_post_inner = claims_inner[0] * claims_inner[1];
 
     let (proof_eq_sc_inner, _C1, _C2) = EqualityProof::prove(
-      &pk.gens.get_scalar_gen(),
+      pk.gens.get_scalar_gen(),
       &mut transcript,
       &claim_post_inner,
       &blind_expected_claim_post_inner,
@@ -495,7 +495,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> RelaxedR1CSSNARKTrait<G
       };
 
       comm_eval_W.decompress()? * (G::Scalar::one() - r_y[0])
-        + G::CE::commit(&vk.gens.get_scalar_gen(), &[eval_X], &G::Scalar::zero()) * r_y[0]
+        + G::CE::commit(vk.gens.get_scalar_gen(), &[eval_X], &G::Scalar::zero()) * r_y[0]
     };
 
     // perform the final check in the second sum-check protocol
@@ -672,7 +672,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
     // Evaluate E at r_x. We do this to compute blind and claim of outer sumcheck
     let eval_E = MultilinearPolynomial::new(W.E.clone()).evaluate(&r_x);
     let blind_eval_E = G::Scalar::random(&mut OsRng);
-    let comm_eval_E = G::CE::commit(&pk.gens.get_scalar_gen(), &[eval_E], &blind_eval_E).compress();
+    let comm_eval_E = G::CE::commit(pk.gens.get_scalar_gen(), &[eval_E], &blind_eval_E).compress();
     comm_eval_E.append_to_transcript(b"comm_eval_E", &mut transcript);
 
     let blind_expected_claim_outer =
@@ -770,7 +770,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
 
     let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
     let blind_eval_W = G::Scalar::random(&mut OsRng);
-    let comm_eval_W = G::CE::commit(&pk.gens.get_scalar_gen(), &[eval_W], &blind_eval_W).compress();
+    let comm_eval_W = G::CE::commit(pk.gens.get_scalar_gen(), &[eval_W], &blind_eval_W).compress();
     comm_eval_W.append_to_transcript(b"comm_eval_W", &mut transcript);
 
     // prove the final step of inner sumcheck
@@ -779,7 +779,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
     let claim_post_inner = claims_inner[0] * claims_inner[1];
 
     let (proof_eq_sc_inner, _C1, _C2) = EqualityProof::prove(
-      &pk.gens.get_scalar_gen(),
+      pk.gens.get_scalar_gen(),
       &mut transcript,
       &claim_post_inner,
       &blind_expected_claim_post_inner,
@@ -934,7 +934,7 @@ impl<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> CAPRelaxedR1CSSNARKTrai
       };
 
       comm_eval_W.decompress()? * (G::Scalar::one() - r_y[0])
-        + G::CE::commit(&vk.gens.get_scalar_gen(), &[eval_X], &G::Scalar::zero()) * r_y[0]
+        + G::CE::commit(vk.gens.get_scalar_gen(), &[eval_X], &G::Scalar::zero()) * r_y[0]
     };
 
     // perform the final check in the second sum-check protocol

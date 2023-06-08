@@ -269,6 +269,7 @@ mod tests {
       z.to_vec()
     }
 
+    #[allow(clippy::let_and_return)]
     fn synthesize<CS>(
       &self,
       cs: &mut CS,
@@ -298,16 +299,14 @@ mod tests {
         SpongeAPI::absorb(
           &mut sponge,
           2,
-          &[
-            Elt::Allocated(alloc_v),
-            Elt::Allocated(alloc_s),
-          ],
+          &[Elt::Allocated(alloc_v), Elt::Allocated(alloc_s)],
           acc,
         );
 
         let output = SpongeAPI::squeeze(&mut sponge, 1, acc);
         sponge.finish(acc).unwrap();
-        let out = Elt::ensure_allocated(&output[0], &mut acc.namespace(|| "ensure allocated"), true)?;
+        let out =
+          Elt::ensure_allocated(&output[0], &mut acc.namespace(|| "ensure allocated"), true)?;
         out
       };
 
@@ -455,7 +454,7 @@ mod tests {
 
     // produce commitment to v
     let blind_v = <G as Group>::Scalar::random(&mut OsRng);
-    let com_v = <G as Group>::CE::commit(&pk.pk.gens.get_scalar_gen(), &[v], &blind_v).compress();
+    let com_v = <G as Group>::CE::commit(pk.pk.gens.get_scalar_gen(), &[v], &blind_v).compress();
 
     // setup inputs
     let z_0 = vec![d];
@@ -468,10 +467,7 @@ mod tests {
 
     // verify the SNARK
     let z_out = circuit.output(&z_0);
-    let io = z_0
-      .into_iter()
-      .chain(z_out.into_iter())
-      .collect::<Vec<_>>();
+    let io = z_0.into_iter().chain(z_out.into_iter()).collect::<Vec<_>>();
     let res = snark.cap_verify(&vk, &io, &com_v);
     assert!(res.is_ok());
   }

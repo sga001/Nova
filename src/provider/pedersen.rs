@@ -94,6 +94,15 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
     }
   }
 
+  fn from_preprocessed(gens: Vec<G::PreprocessedGroupElement>) -> CommitmentGens<G> {
+    let h = G::get_generator().preprocessed(); // this is irrelevant since we will not use a blind
+    CommitmentGens {
+      gens,
+      h,
+      _p: Default::default(),
+    }
+  }
+
   fn len(&self) -> usize {
     self.gens.len()
   }
@@ -132,6 +141,10 @@ impl<G: Group> CommitmentTrait<G> for Commitment<G> {
 
   fn to_coordinates(&self) -> (G::Base, G::Base, bool) {
     self.comm.to_coordinates()
+  }
+
+  fn reinterpret_as_generator(&self) -> G::PreprocessedGroupElement {
+    self.comm.preprocessed()
   }
 }
 
