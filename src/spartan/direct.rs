@@ -269,6 +269,7 @@ mod tests {
       z.to_vec()
     }
 
+    #[allow(clippy::let_and_return)]
     fn synthesize<CS>(
       &self,
       cs: &mut CS,
@@ -453,7 +454,7 @@ mod tests {
 
     // produce commitment to v
     let blind_v = <G as Group>::Scalar::random(&mut OsRng);
-    let com_v = <G as Group>::CE::commit(&pk.pk.gens.get_scalar_gen(), &[v], &blind_v).compress();
+    let com_v = <G as Group>::CE::commit(pk.pk.gens.get_scalar_gen(), &[v], &blind_v).compress();
 
     // setup inputs
     let z_0 = vec![d];

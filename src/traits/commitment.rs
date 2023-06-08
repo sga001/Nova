@@ -51,7 +51,7 @@ pub trait CommitmentGensTrait<G: Group>:
   fn get_blinding_gen(&self) -> G::PreprocessedGroupElement;
 
   /// Converts a commitment into generators (with no blinding generator)
-  fn from_commitments(com: &[Self::Commitment]) -> Self;
+  fn from_preprocessed(com: Vec<G::PreprocessedGroupElement>) -> Self;
 }
 
 /// Defines basic operations on commitments

@@ -92,6 +92,11 @@ impl<Scalar: PrimeField> MultilinearPolynomial<Scalar> {
     self.Z.len()
   }
 
+  /// Returns whether polynomial is empty
+  pub fn is_empty(&self) -> bool {
+    self.Z.len() == 0
+  }
+
   /// TBD
   pub fn bound(&self, L: &[Scalar]) -> Vec<Scalar> {
     let (left_num_vars, right_num_vars) =
@@ -103,7 +108,7 @@ impl<Scalar: PrimeField> MultilinearPolynomial<Scalar> {
       .map(|i| {
         (0..L_size)
           .map(|j| L[j] * self.Z[j * R_size + i])
-          .fold(Scalar::zero(), |x, y| x + &y)
+          .fold(Scalar::zero(), |x, y| x + y)
       })
       .collect()
   }

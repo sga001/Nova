@@ -94,12 +94,8 @@ impl<G: Group> CommitmentGensTrait<G> for CommitmentGens<G> {
     }
   }
 
-  fn from_commitments(com: &[Commitment<G>]) -> CommitmentGens<G> {
-    let gens: Vec<G::PreprocessedGroupElement> =
-      com.iter().map(|pt| pt.reinterpret_as_generator()).collect();
-
+  fn from_preprocessed(gens: Vec<G::PreprocessedGroupElement>) -> CommitmentGens<G> {
     let h = G::get_generator().preprocessed(); // this is irrelevant since we will not use a blind
-                                               //
     CommitmentGens {
       gens,
       h,
