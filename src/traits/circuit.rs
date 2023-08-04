@@ -41,7 +41,7 @@ where
   /// Creates a new trivial test circuit with a particular step counter type
   pub fn new(counter_type: StepCounterType) -> TrivialTestCircuit<F> {
     Self {
-      _p: PhantomData::default(),
+      _p: PhantomData,
       counter_type,
     }
   }
@@ -54,7 +54,7 @@ where
   /// Creates a new trivial test circuit with step counter type Incremental
   fn default() -> TrivialTestCircuit<F> {
     Self {
-      _p: PhantomData::default(),
+      _p: PhantomData,
       counter_type: StepCounterType::Incremental,
     }
   }

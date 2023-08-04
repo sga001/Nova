@@ -818,7 +818,7 @@ mod tests {
   {
     pub fn new(counter_type: StepCounterType) -> CubicCircuit<F> {
       Self {
-        _p: PhantomData::default(),
+        _p: PhantomData,
         counter_type,
       }
     }
@@ -831,7 +831,7 @@ mod tests {
     /// Creates a new trivial test circuit with step counter type Incremental
     fn default() -> CubicCircuit<F> {
       Self {
-        _p: PhantomData::default(),
+        _p: PhantomData,
         counter_type: StepCounterType::Incremental,
       }
     }
