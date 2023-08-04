@@ -219,7 +219,7 @@ where
     ipa.verify(
       &self.gens_v,
       &self.gens_s,
-      L.len(),
+      R.len(),
       &ipa_instance,
       transcript,
     )
