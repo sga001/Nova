@@ -61,7 +61,8 @@ impl<G: Group> SumcheckGens<G> {
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
-  gens: EE::EvaluationGens,
+  /// gens
+  pub gens: EE::EvaluationGens,
   sumcheck_gens: SumcheckGens<G>,
   S: R1CSShape<G>,
 }
