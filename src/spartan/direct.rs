@@ -468,7 +468,7 @@ mod tests {
 
     // verify the SNARK
     let z_out = circuit.output(&z_0);
-    let io = z_0.into_iter().chain(z_out.into_iter()).collect::<Vec<_>>();
+    let io = z_0.into_iter().chain(z_out).collect::<Vec<_>>();
     let res = snark.cap_verify(&vk, &io, &com_v);
     assert!(res.is_ok());
   }
@@ -543,10 +543,7 @@ mod tests {
     let snark = res.unwrap();
 
     // verify the SNARK
-    let io = input
-      .into_iter()
-      .chain(output.clone().into_iter())
-      .collect::<Vec<_>>();
+    let io = input.into_iter().chain(output.clone()).collect::<Vec<_>>();
     let res = snark.verify(&vk, &io);
     assert!(res.is_ok());
 
