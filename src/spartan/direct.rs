@@ -69,7 +69,8 @@ where
 {
   gens: R1CSGens<G>,
   S: R1CSShape<G>,
-  pk: ProverKey<G, EE>,
+  /// pk
+  pub pk: ProverKey<G, EE>,
 }
 
 /// A type that holds Spartan's verifier's key
