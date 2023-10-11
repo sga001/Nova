@@ -3,7 +3,8 @@ use core::ops::Index;
 use ff::PrimeField;
 use rayon::prelude::*;
 
-pub(crate) struct EqPolynomial<Scalar: PrimeField> {
+/// Polynomial struct
+pub struct EqPolynomial<Scalar: PrimeField> {
   r: Vec<Scalar>,
 }
 
@@ -21,6 +22,7 @@ impl<Scalar: PrimeField> EqPolynomial<Scalar> {
       .fold(Scalar::one(), |acc, item| acc * item)
   }
 
+  /// evals
   pub fn evals(&self) -> Vec<Scalar> {
     let ell = self.r.len();
     let mut evals: Vec<Scalar> = vec![Scalar::zero(); (2_usize).pow(ell as u32)];
@@ -44,10 +46,12 @@ impl<Scalar: PrimeField> EqPolynomial<Scalar> {
     evals
   }
 
+  /// factored lens
   pub fn compute_factored_lens(ell: usize) -> (usize, usize) {
     (ell / 2, ell - ell / 2)
   }
 
+  /// factored evals
   pub fn compute_factored_evals(&self) -> (Vec<Scalar>, Vec<Scalar>) {
     let ell = self.r.len();
     let (left_num_vars, _right_num_vars) = EqPolynomial::<Scalar>::compute_factored_lens(ell);
