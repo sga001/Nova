@@ -1,3 +1,4 @@
+//! This module defines nizk proofs
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
 use crate::errors::NovaError;
@@ -13,6 +14,7 @@ use merlin::Transcript;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 
+/// KnowledgeProof
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct KnowledgeProof<G: Group> {
@@ -21,6 +23,7 @@ pub struct KnowledgeProof<G: Group> {
   z2: G::Scalar,
 }
 
+/// EqualityProof
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct EqualityProof<G: Group> {
@@ -28,6 +31,7 @@ pub struct EqualityProof<G: Group> {
   z: G::Scalar,
 }
 
+/// ProductProof
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct ProductProof<G: Group> {
@@ -37,6 +41,7 @@ pub struct ProductProof<G: Group> {
   z: [G::Scalar; 5],
 }
 
+/// DocProductProof
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct DotProductProof<G: Group> {
@@ -47,11 +52,13 @@ pub struct DotProductProof<G: Group> {
   z_beta: G::Scalar,
 }
 
+/// KnowledgeProof
 impl<G: Group> KnowledgeProof<G> {
   fn protocol_name() -> &'static [u8] {
     b"knowledge proof"
   }
 
+  /// prove
   pub fn prove(
     gens_n: &CommitmentGens<G>,
     transcript: &mut Transcript,
@@ -78,6 +85,7 @@ impl<G: Group> KnowledgeProof<G> {
     Ok((Self { alpha, z1, z2 }, C))
   }
 
+  /// verify
   pub fn verify(
     &self,
     gens_n: &CommitmentGens<G>,
@@ -101,11 +109,14 @@ impl<G: Group> KnowledgeProof<G> {
   }
 }
 
+/// EqualityProof
 impl<G: Group> EqualityProof<G> {
+  /// protocol name
   fn protocol_name() -> &'static [u8] {
     b"equality proof"
   }
 
+  /// prove
   pub fn prove(
     gens_n: &CommitmentGens<G>,
     transcript: &mut Transcript,
@@ -142,6 +153,7 @@ impl<G: Group> EqualityProof<G> {
     Ok((Self { alpha, z }, C1, C2))
   }
 
+  /// verify
   pub fn verify(
     &self,
     gens_n: &CommitmentGens<G>,
@@ -171,11 +183,14 @@ impl<G: Group> EqualityProof<G> {
   }
 }
 
+/// product proof
 impl<G: Group> ProductProof<G> {
+  /// protocol name
   fn protocol_name() -> &'static [u8] {
     b"product proof"
   }
 
+  /// prove
   pub fn prove(
     gens_n: &CommitmentGens<G>,
     transcript: &mut Transcript,
@@ -247,6 +262,7 @@ impl<G: Group> ProductProof<G> {
     ))
   }
 
+  /// check_equality
   fn check_equality(
     P: &CompressedCommitment<G>,
     X: &CompressedCommitment<G>,
@@ -261,6 +277,7 @@ impl<G: Group> ProductProof<G> {
     Ok(lhs == rhs)
   }
 
+  /// verify
   pub fn verify(
     &self,
     gens_n: &CommitmentGens<G>,
@@ -305,11 +322,14 @@ impl<G: Group> ProductProof<G> {
   }
 }
 
+/// DotProductProof
 impl<G: Group> DotProductProof<G> {
+  /// protocol name
   pub fn protocol_name() -> &'static [u8] {
     b"dot product proof"
   }
 
+  /// comppute dot product
   pub fn compute_dotproduct(a: &[G::Scalar], b: &[G::Scalar]) -> G::Scalar {
     assert_eq!(a.len(), b.len());
     let mut result = G::Scalar::zero();
@@ -321,6 +341,7 @@ impl<G: Group> DotProductProof<G> {
     result
   }
 
+  /// prove
   pub fn prove(
     gens_1: &CommitmentGens<G>, // generator of size 1
     gens_n: &CommitmentGens<G>, // generators of size n
@@ -384,6 +405,7 @@ impl<G: Group> DotProductProof<G> {
     )
   }
 
+  /// verify
   pub fn verify(
     &self,
     gens_1: &CommitmentGens<G>, // generator of size 1
