@@ -27,8 +27,10 @@ pub struct KnowledgeProof<G: Group> {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct EqualityProof<G: Group> {
-  alpha: CompressedCommitment<G>,
-  z: G::Scalar,
+  /// alpha
+  pub alpha: CompressedCommitment<G>,
+  /// z
+  pub z: G::Scalar,
 }
 
 /// ProductProof
@@ -112,7 +114,7 @@ impl<G: Group> KnowledgeProof<G> {
 /// EqualityProof
 impl<G: Group> EqualityProof<G> {
   /// protocol name
-  fn protocol_name() -> &'static [u8] {
+  pub fn protocol_name() -> &'static [u8] {
     b"equality proof"
   }
 

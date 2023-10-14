@@ -23,7 +23,8 @@ use serde::{Deserialize, Serialize};
 pub struct CommitmentGens<G: Group> {
   /// generator vec  
   pub gens: Vec<G::PreprocessedGroupElement>,
-  h: G::PreprocessedGroupElement,
+  /// temporary public for debug
+  pub h: G::PreprocessedGroupElement,
   _p: PhantomData<G>,
 }
 
