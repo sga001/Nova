@@ -571,18 +571,28 @@ where
   S1: RelaxedR1CSSNARKTrait<G1>,
   S2: RelaxedR1CSSNARKTrait<G2>,
 {
-  r_U_primary: RelaxedR1CSInstance<G1>,
-  l_u_primary: R1CSInstance<G1>,
-  nifs_primary: NIFS<G1>,
-  f_W_snark_primary: S1,
+  /// r_U_primary
+  pub r_U_primary: RelaxedR1CSInstance<G1>,
+  /// l_u_primary
+  pub l_u_primary: R1CSInstance<G1>,
+  /// nifs_primary
+  pub nifs_primary: NIFS<G1>,
+  /// f_W_snark_primary
+  pub f_W_snark_primary: S1,
 
-  r_U_secondary: RelaxedR1CSInstance<G2>,
-  l_u_secondary: R1CSInstance<G2>,
-  nifs_secondary: NIFS<G2>,
-  f_W_snark_secondary: S2,
+  /// r_U_secondary
+  pub r_U_secondary: RelaxedR1CSInstance<G2>,
+  /// l_u_secondary
+  pub l_u_secondary: R1CSInstance<G2>,
+  /// nifs_secondary
+  pub nifs_secondary: NIFS<G2>,
+  /// f_W_snark_secondary
+  pub f_W_snark_secondary: S2,
 
-  zn_primary: Vec<G1::Scalar>,
-  zn_secondary: Vec<G2::Scalar>,
+  /// zn primary
+  pub zn_primary: Vec<G1::Scalar>,
+  /// zn secondary
+  pub zn_secondary: Vec<G2::Scalar>,
 
   _p_c1: PhantomData<C1>,
   _p_c2: PhantomData<C2>,
