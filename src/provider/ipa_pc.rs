@@ -661,6 +661,58 @@ where
     })
   }
 
+  fn verification_scalars(
+    &self,
+    n: usize,
+    transcript: &mut Transcript,
+  ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofVerifyError> {
+    let lg_n = self.L_vec.len();
+    if lg_n >= 32 {
+      // 4 billion multiplications should be enough for anyone
+      // and this check prevents overflow in 1<<lg_n below.
+      return Err(ProofVerifyError::InternalError);
+    }
+    if n != (1 << lg_n) {
+      return Err(ProofVerifyError::InternalError);
+    }
+
+    let mut challenges = Vec::with_capacity(lg_n);
+
+    // Recompute x_k,...,x_1 based on the proof transcript
+    for (P_L, P_R) in self.P_L_vec.iter().zip(self.P_R_vec.iter()) {
+      P_L.append_to_transcript(b"L", transcript);
+      P_R.append_to_transcript(b"R", transcript);
+
+      challenges.push(G::Scalar::challenge(b"challenge_r", transcript));
+    }
+
+    // inverses
+    let mut challenges_inv = challenges.clone();
+    let prod_all_inv = Scalar::batch_invert(&mut challenges_inv);
+
+    // squares of challenges & inverses
+    for i in 0..lg_n {
+      challenges[i] = challenges[i].square();
+      challenges_inv[i] = challenges_inv[i].square();
+    }
+    let challenges_sq = challenges;
+    let challenges_inv_sq = challenges_inv;
+
+    // s values inductively - wtf is happening here? check
+    let mut s = Vec::with_capacity(n);
+    s.push(allinv);
+    for i in 1..n {
+      let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
+      let k = 1 << lg_i;
+      // The challenges are stored in "creation order" as [u_k,...,u_1],
+      // so u_{lg(i)+1} = is indexed by (lg_n-1) - lg_i
+      let u_lg_i_sq = challenges_sq[(lg_n - 1) - lg_i];
+      s.push(s[i - k] * u_lg_i_sq);
+    }
+
+    Ok((challenges_sq, challenges_inv_sq, s))
+  }
+
   /// verify inner product argument
   pub fn verify(
     &self,
