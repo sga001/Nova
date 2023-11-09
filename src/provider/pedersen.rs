@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 /// A type that holds commitment generators
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentGens<G: Group> {
-  gens: Vec<G::PreprocessedGroupElement>,
+  /// generator vector
+  pub gens: Vec<G::PreprocessedGroupElement>,
   h: G::PreprocessedGroupElement,
   _p: PhantomData<G>,
 }

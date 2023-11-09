@@ -665,15 +665,15 @@ where
     &self,
     n: usize,
     transcript: &mut Transcript,
-  ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofVerifyError> {
-    let lg_n = self.L_vec.len();
+  ) -> Result<(Vec<G::Scalar>, Vec<G::Scalar>, Vec<G::Scalar>), NovaError> {
+    let lg_n = self.P_L_vec.len();
     if lg_n >= 32 {
       // 4 billion multiplications should be enough for anyone
       // and this check prevents overflow in 1<<lg_n below.
-      return Err(ProofVerifyError::InternalError);
+      return Err(NovaError::ProofVerifyError);
     }
     if n != (1 << lg_n) {
-      return Err(ProofVerifyError::InternalError);
+      return Err(NovaError::ProofVerifyError);
     }
 
     let mut challenges = Vec::with_capacity(lg_n);
@@ -688,7 +688,7 @@ where
 
     // inverses
     let mut challenges_inv = challenges.clone();
-    let prod_all_inv = Scalar::batch_invert(&mut challenges_inv);
+    let prod_all_inv = G::Scalar::batch_invert(&mut challenges_inv);
 
     // squares of challenges & inverses
     for i in 0..lg_n {
@@ -700,7 +700,7 @@ where
 
     // s values inductively - wtf is happening here? check
     let mut s = Vec::with_capacity(n);
-    s.push(allinv);
+    s.push(prod_all_inv);
     for i in 1..n {
       let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
       let k = 1 << lg_i;
@@ -744,17 +744,34 @@ where
     let mut a_vec = U.a_vec.clone();
 
     // Step 1 in Hyrax's figure 7.
-    for i in 0..self.P_L_vec.len() {
-      let P_L = self.P_L_vec[i].decompress().unwrap();
-      let P_R = self.P_R_vec[i].decompress().unwrap();
+    /*  for i in 0..self.P_L_vec.len() {
+          let P_L = self.P_L_vec[i].decompress().unwrap();
+          let P_R = self.P_R_vec[i].decompress().unwrap();
 
-      let (P_prime, a_vec_prime, gens_prime) =
-        Self::bullet_reduce_verifier(&P, &P_L, &P_R, &a_vec, &gens, transcript)?;
+          let (P_prime, a_vec_prime, gens_prime) =
+            Self::bullet_reduce_verifier(&P, &P_L, &P_R, &a_vec, &gens, transcript)?;
 
-      P = P_prime;
-      a_vec = a_vec_prime;
-      gens = gens_prime;
-    }
+          P = P_prime;
+          a_vec = a_vec_prime;
+          gens = gens_prime;
+        }
+    */
+
+    let (u_sq, u_inv_sq, s) = self.verification_scalars(n, transcript)?;
+
+    gens.gens = G::vartime_multiscalar_mul(&s, &gens.gens);
+    let a = inner_product(&a_vec[..], &s[..]);
+
+    let Ls = self.P_L_vec.iter().map(|p| p.decompress()).collect();
+
+    let Rs = self.P_R_vec.iter().map(|p| p.decompress()).collect();
+
+    u_sq.append(&mut u_inv_sq);
+    u_sq.push(G::Scalar::one());
+
+    Ls.append(&mut Rs);
+    Ls.push(P.clone());
+    P.comm = G::vartime_multiscalar_mul(&u_sq, &Ls[..]);
 
     // Step 3 in Hyrax's Figure 7
     self.beta.append_to_transcript(b"beta", transcript);
@@ -763,11 +780,11 @@ where
     let chal = G::Scalar::challenge(b"chal_z", transcript);
 
     let P_plus_beta = P * chal + self.beta.decompress().unwrap();
-    let P_plus_beta_to_a = P_plus_beta * a_vec[0];
+    let P_plus_beta_to_a = P_plus_beta * a;
     let left_hand_side = P_plus_beta_to_a + self.delta.decompress().unwrap();
 
     let g_hat = CE::<G>::commit(&gens, &[G::Scalar::one()], &G::Scalar::zero());
-    let g_to_a = CE::<G>::commit(&gens_y, &a_vec, &G::Scalar::zero()); // g^a*h^0 = g^a
+    let g_to_a = CE::<G>::commit(&gens_y, &[a], &G::Scalar::zero()); // g^a*h^0 = g^a
     let h_to_z2 = CE::<G>::commit(&gens_y, &[G::Scalar::zero()], &self.z_2); // g^0 * h^z2 = h^z2
 
     let g_hat_plus_g_to_a = g_hat + g_to_a;
