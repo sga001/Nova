@@ -661,6 +661,53 @@ where
     })
   }
 
+  fn batch_invert(inputs: &mut [G::Scalar]) -> G::Scalar {
+    // This code is essentially identical to the FieldElement
+    // implementation, and is documented there.  Unfortunately,
+    // it's not easy to write it generically, since here we want
+    // to use `UnpackedScalar`s internally, and `Scalar`s
+    // externally, but there's no corresponding distinction for
+    // field elements.
+
+    let n = inputs.len();
+    let one = G::Scalar::one();
+
+    // Place scratch storage in a Zeroizing wrapper to wipe it when
+    // we pass out of scope.
+    let scratch = vec![one; n];
+    // let mut scratch = Zeroizing::new(scratch_vec);
+
+    // Keep an accumulator of all of the previous products
+    let mut acc = G::Scalar::one();
+
+    // Pass through the input vector, recording the previous
+    // products in the scratch space
+    for (input, scratch) in inputs.iter().zip(scratch.iter_mut()) {
+      *scratch = acc;
+
+      acc = acc * input;
+    }
+
+    // acc is nonzero iff all inputs are nonzero
+    debug_assert!(acc != G::Scalar::zero());
+
+    // Compute the inverse of all products
+    acc = acc.invert().unwrap();
+
+    // We need to return the product of all inverses later
+    let ret = acc;
+
+    // Pass through the vector backwards to compute the inverses
+    // in place
+    for (input, scratch) in inputs.iter_mut().rev().zip(scratch.iter().rev()) {
+      let tmp = acc * input.clone();
+      *input = acc * scratch;
+      acc = tmp;
+    }
+
+    ret
+  }
+
   fn verification_scalars(
     &self,
     n: usize,
@@ -688,7 +735,7 @@ where
 
     // inverses
     let mut challenges_inv = challenges.clone();
-    let prod_all_inv = G::Scalar::batch_invert(&mut challenges_inv);
+    let prod_all_inv = Self::batch_invert(&mut challenges_inv);
 
     // squares of challenges & inverses
     for i in 0..lg_n {
