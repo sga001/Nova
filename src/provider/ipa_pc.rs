@@ -643,7 +643,7 @@ where
     for (input, scratch) in inputs.iter().zip(scratch.iter_mut()) {
       *scratch = acc;
 
-      acc = acc * input;
+      acc *= input;
     }
 
     // acc is nonzero iff all inputs are nonzero
@@ -658,7 +658,7 @@ where
     // Pass through the vector backwards to compute the inverses
     // in place
     for (input, scratch) in inputs.iter_mut().rev().zip(scratch.iter().rev()) {
-      let tmp = acc * input.clone();
+      let tmp = acc * *input;
       *input = acc * scratch;
       acc = tmp;
     }
@@ -748,10 +748,10 @@ where
 
     let a_vec = U.a_vec.clone();
 
-    // Step 1 in Hyrax's figure 7.
-
+    // calculate all the exponent challenges (s) and inverses at once
     let (mut u_sq, mut u_inv_sq, s) = self.verification_scalars(n, transcript)?;
 
+    // do all the exponentiations at once (Hyrax, Fig. 7, step 4, all rounds)
     let g_hat = G::vartime_multiscalar_mul(&s, &gens.get_gens());
     let a = inner_product(&a_vec[..], &s[..]);
 
@@ -774,12 +774,14 @@ where
 
     let P_comm = G::vartime_multiscalar_mul(&u_sq, &Ls[..]);
 
-    // Step 3 in Hyrax's Figure 7
+    // Step 3 in Hyrax's Figure 8
     self.beta.append_to_transcript(b"beta", transcript);
     self.delta.append_to_transcript(b"delta", transcript);
 
     let chal = G::Scalar::challenge(b"chal_z", transcript);
 
+    // Step 5 in Hyrax's Figure 8
+    // P^(chal*a) * beta^a * delta^1
     let left_hand_side = G::vartime_multiscalar_mul(
       &[(chal * a), a, G::Scalar::one()],
       &[
