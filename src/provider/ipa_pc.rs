@@ -633,7 +633,7 @@ where
     // Place scratch storage in a Zeroizing wrapper to wipe it when
     // we pass out of scope.
     let mut scratch = vec![one; n];
-    // let mut scratch = Zeroizing::new(scratch_vec);
+    //let mut scratch = Zeroizing::new(scratch_vec);
 
     // Keep an accumulator of all of the previous products
     let mut acc = G::Scalar::one();

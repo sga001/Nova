@@ -34,7 +34,6 @@ flate2 = "1.0"
 bitvec = "1.0"
 byteorder = "1.4.3"
 thiserror = "1.0" 
-zeroize = { version = "1.5", default-features = false }
 
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 pasta-msm = { version = "0.1.0", package = "lurk-pasta-msm" }
