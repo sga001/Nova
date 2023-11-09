@@ -508,7 +508,7 @@ where
     ))
   }
 
-  fn bullet_reduce_verifier(
+  /*fn bullet_reduce_verifier(
     P: &Commitment<G>,
     P_L: &Commitment<G>,
     P_R: &Commitment<G>,
@@ -549,7 +549,7 @@ where
     let P_prime = *P_L * chal_square + *P + *P_R * chal_inverse_square;
 
     Ok((P_prime, a_vec_prime, gens_prime))
-  }
+  }*/
 
   /// prover inner product argument
   pub fn prove(
@@ -674,7 +674,7 @@ where
 
     // Place scratch storage in a Zeroizing wrapper to wipe it when
     // we pass out of scope.
-    let scratch = vec![one; n];
+    let mut scratch = vec![one; n];
     // let mut scratch = Zeroizing::new(scratch_vec);
 
     // Keep an accumulator of all of the previous products
@@ -785,10 +785,9 @@ where
     // Scaling to be compatible with Bulletproofs figure 1
     let chal = G::Scalar::challenge(b"r", transcript); // sample a random challenge for scaling commitment
     let gens_y = gens_y.scale(&chal);
-    let mut P = U.comm_x_vec + U.comm_y * chal;
+    let P = U.comm_x_vec + U.comm_y * chal;
 
-    let mut gens = gens.clone();
-    let mut a_vec = U.a_vec.clone();
+    let a_vec = U.a_vec.clone();
 
     // Step 1 in Hyrax's figure 7.
     /*  for i in 0..self.P_L_vec.len() {
@@ -804,21 +803,29 @@ where
         }
     */
 
-    let (u_sq, u_inv_sq, s) = self.verification_scalars(n, transcript)?;
+    let (mut u_sq, mut u_inv_sq, s) = self.verification_scalars(n, transcript)?;
 
-    gens.gens = G::vartime_multiscalar_mul(&s, &gens.gens);
+    let g_hat = G::vartime_multiscalar_mul(&s, &gens.get_gens());
     let a = inner_product(&a_vec[..], &s[..]);
 
-    let Ls = self.P_L_vec.iter().map(|p| p.decompress()).collect();
+    let mut Ls: Vec<G::PreprocessedGroupElement> = self
+      .P_L_vec
+      .iter()
+      .map(|p| p.decompress().unwrap().reinterpret_as_generator())
+      .collect();
+    let mut Rs: Vec<G::PreprocessedGroupElement> = self
+      .P_R_vec
+      .iter()
+      .map(|p| p.decompress().unwrap().reinterpret_as_generator())
+      .collect();
 
-    let Rs = self.P_R_vec.iter().map(|p| p.decompress()).collect();
+    Ls.append(&mut Rs);
+    Ls.push(P.reinterpret_as_generator());
 
     u_sq.append(&mut u_inv_sq);
     u_sq.push(G::Scalar::one());
 
-    Ls.append(&mut Rs);
-    Ls.push(P.clone());
-    P.comm = G::vartime_multiscalar_mul(&u_sq, &Ls[..]);
+    let P_comm = G::vartime_multiscalar_mul(&u_sq, &Ls[..]);
 
     // Step 3 in Hyrax's Figure 7
     self.beta.append_to_transcript(b"beta", transcript);
@@ -826,17 +833,38 @@ where
 
     let chal = G::Scalar::challenge(b"chal_z", transcript);
 
-    let P_plus_beta = P * chal + self.beta.decompress().unwrap();
-    let P_plus_beta_to_a = P_plus_beta * a;
-    let left_hand_side = P_plus_beta_to_a + self.delta.decompress().unwrap();
+    let left_hand_side = G::vartime_multiscalar_mul(
+      &[(chal * a), a, G::Scalar::one()],
+      &[
+        P_comm.preprocessed(),
+        self.beta.decompress().unwrap().reinterpret_as_generator(),
+        self.delta.decompress().unwrap().reinterpret_as_generator(),
+      ],
+    );
+    /*
+        let P_plus_beta = P * chal + self.beta.decompress().unwrap();
+        let P_plus_beta_to_a = P_plus_beta * a;
+        let left_hand_side = P_plus_beta_to_a + self.delta.decompress().unwrap();
+    */
+    // g_hat^z1 * g^(a*z1) * h^z2
+    let right_hand_side = G::vartime_multiscalar_mul(
+      &[self.z_1, (self.z_1 * a), self.z_2],
+      &[
+        g_hat.preprocessed(),
+        gens_y.get_gens()[0].clone(),
+        gens_y.get_blinding_gen(),
+      ],
+    );
 
-    let g_hat = CE::<G>::commit(&gens, &[G::Scalar::one()], &G::Scalar::zero());
-    let g_to_a = CE::<G>::commit(&gens_y, &[a], &G::Scalar::zero()); // g^a*h^0 = g^a
-    let h_to_z2 = CE::<G>::commit(&gens_y, &[G::Scalar::zero()], &self.z_2); // g^0 * h^z2 = h^z2
+    /*let g_hat = gens_g; // Check? //CE::<G>::commit(&gens, &[G::Scalar::one()], &G::Scalar::zero());
 
-    let g_hat_plus_g_to_a = g_hat + g_to_a;
-    let val_to_z1 = g_hat_plus_g_to_a * self.z_1;
-    let right_hand_side = val_to_z1 + h_to_z2;
+        let g_to_a = G::vartime_multiscalar_mul(&[a], gens_y.get_gens()); //CE::<G>::commit(&gens_y, &[a], &G::Scalar::zero()); // g^a*h^0 = g^a
+        let h_to_z2 = G::vartime_multiscalar_mul(&[a], gens_y.get_gens()); //CE::<G>::commit(&gens_y, &[G::Scalar::zero()], &self.z_2); // g^0 * h^z2 = h^z2
+
+        let g_hat_plus_g_to_a = g_hat + g_to_a;
+        let val_to_z1 = g_hat_plus_g_to_a * self.z_1;
+        let right_hand_side = val_to_z1 + h_to_z2;
+    */
 
     if left_hand_side == right_hand_side {
       Ok(())
