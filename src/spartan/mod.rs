@@ -1,7 +1,7 @@
 //! This module implements RelaxedR1CSSNARKTrait and CAPRelaxedR1CSSNARKTrait using Spartan that is generic
 //! over the polynomial commitment and evaluation argument (i.e., a PCS)
 pub mod direct;
-mod nizk;
+pub mod nizk;
 pub mod polynomial;
 mod sumcheck;
 
@@ -61,7 +61,8 @@ impl<G: Group> SumcheckGens<G> {
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct ProverKey<G: Group, EE: EvaluationEngineTrait<G, CE = G::CE>> {
-  gens: EE::EvaluationGens,
+  /// gens
+  pub gens: EE::EvaluationGens,
   sumcheck_gens: SumcheckGens<G>,
   S: R1CSShape<G>,
 }

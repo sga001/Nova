@@ -21,8 +21,10 @@ use serde::{Deserialize, Serialize};
 /// A type that holds commitment generators
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentGens<G: Group> {
-  gens: Vec<G::PreprocessedGroupElement>,
-  h: G::PreprocessedGroupElement,
+  /// generator vec  
+  pub gens: Vec<G::PreprocessedGroupElement>,
+  /// temporary public for debug
+  pub h: G::PreprocessedGroupElement,
   _p: PhantomData<G>,
 }
 
@@ -30,7 +32,8 @@ pub struct CommitmentGens<G: Group> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct Commitment<G: Group> {
-  pub(crate) comm: G,
+  /// commitment elt
+  pub comm: G,
 }
 
 /// A type that holds a compressed commitment

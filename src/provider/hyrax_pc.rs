@@ -34,8 +34,10 @@ pub struct PolyCommit<G: Group> {
 
 /// Hyrax PC generators and functions to commit and prove evaluation
 pub struct HyraxPC<G: Group> {
-  gens_v: CommitmentGens<G>, // generator for vectors
-  gens_s: CommitmentGens<G>, // generator for scalars (eval)
+  /// generator for vectors
+  pub gens_v: CommitmentGens<G>, // generator for vectors
+  /// generator for scalars (eval)
+  pub gens_s: CommitmentGens<G>, // generator for scalars (eval)
 }
 
 impl<G: Group> AppendToTranscriptTrait for PolyCommit<G> {
