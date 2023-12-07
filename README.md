@@ -1,3 +1,5 @@
+# This is a fork of Nova that makes the folding and the proof system zero-knowledge, the commitments hiding, and also hides the number of steps executed.
+
 # Nova: Recursive SNARKs without trusted setup
 
 Nova is a high-speed recursive SNARK (a SNARK is type cryptographic proof system that enables a prover to prove a mathematical statement to a verifier with a short proof and succinct verification, and a recursive SNARK enables producing proofs that prove statements about prior proofs). 
