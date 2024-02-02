@@ -18,21 +18,28 @@ use ff::Field;
 use merlin::Transcript;
 use rand::rngs::OsRng;
 use rayon::prelude::*;
+//use serde::de::{self, Deserializer, Visitor};
+use serde::{Deserialize, Serialize};
 
 /// Structure that holds the blinds of a PC
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct PolyCommitBlinds<G: Group> {
   /// Blinds
   pub blinds: Vec<G::Scalar>,
 }
 
 /// Structure that holds Poly Commits
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct PolyCommit<G: Group> {
   /// Commitment
   pub comm: Vec<CompressedCommitment<G>>,
 }
 
 /// Hyrax PC generators and functions to commit and prove evaluation
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct HyraxPC<G: Group> {
   /// generator for vectors
   pub gens_v: CommitmentGens<G>, // generator for vectors

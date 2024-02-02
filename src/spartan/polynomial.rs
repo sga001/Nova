@@ -2,6 +2,7 @@
 use core::ops::Index;
 use ff::PrimeField;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// Polynomial struct
 pub struct EqPolynomial<Scalar: PrimeField> {
@@ -63,7 +64,7 @@ impl<Scalar: PrimeField> EqPolynomial<Scalar> {
   }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 /// A multilinear polynomial with num_vars and 2^num_vars entries
 pub struct MultilinearPolynomial<Scalar: PrimeField> {
   num_vars: usize, // the number of variables in the multilinear polynomial
